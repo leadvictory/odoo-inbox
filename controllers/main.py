@@ -85,12 +85,20 @@ class WebsiteOdooInbox(http.Controller):
         imap_server = server.connect()
         status, capabilities = imap_server.capability()
         _logger.info(f"capability is {str(capabilities)}")
-        if label is None:
-            imap_server.select()
+        # if label is None:
+        #     imap_server.select()
+        # else:
+        #     _label = f'"{label}"'
+        #     imap_server.select(_label)
+        if label:
+            folder_encoded = imapclient.imap_utf7.encode(label)
+            status, _ = imap_server.select(folder_encoded)
         else:
-            _label = f'"{label}"'
-            imap_server.select(_label)
+            status, _ = imap_server.select()
 
+        if status != "OK":
+            _logger.error(f"Cannot select folder: {label}")
+            return request.make_response("<h3>Error: Cannot open folder.</h3>")
         query_parts = []
         # Add search term if provided
         if search:
@@ -167,8 +175,15 @@ class WebsiteOdooInbox(http.Controller):
             
         for folder_name in folders:
             if b'\\HasNoChildren' in folder_name:
+                # real_name = folder_name.decode().split(' "." ')[1].replace("\"", "")
+                # imap_server.select(real_name)
                 real_name = folder_name.decode().split(' "." ')[1].replace("\"", "")
-                imap_server.select(real_name)
+                encoded = imapclient.imap_utf7.encode(real_name)
+                status, _ = imap_server.select(encoded)
+
+                if status != "OK":
+                    _logger.error(f"Cannot select folder: {real_name}")
+                    continue
                 name = folder_name.split(b'.')[-1].decode()
                 folder = { 'name': name.replace("\"", ""), 'id': real_name }
                 folder_ids.append(folder)
@@ -250,8 +265,17 @@ class WebsiteOdooInbox(http.Controller):
         status, folders = imap_server.list()
         found = False
         for folder in folders:
-            real_name = folder.decode().split(' "." ')[1]
-            imap_server.select(real_name)
+            # real_name = folder.decode().split(' "." ')[1]
+            folder_raw = folder.decode()
+            folder_utf7 = folder_raw.split(' "." ')[1].replace('"', '')
+
+            real_name = imapclient.imap_utf7.encode(folder_utf7)
+
+            status, _ = imap_server.select(real_name)
+            if status != "OK":
+                _logger.error(f"Cannot select folder: {folder_utf7}")
+                continue
+
             status, data = imap_server.search(None, f'(HEADER Message-ID "{message_id}")')
             if data and data[0]:
                 found = True
@@ -700,10 +724,15 @@ class WebsiteOdooInbox(http.Controller):
             return False
             
         for folder in folders:
-            real_name = folder.decode().split(' "." ')[1].replace('"', '')
-            real_name = f'"{real_name}"'
-            imap_server.select(real_name)
-            _logger.info(f"folder name is {real_name}")
+            # real_name = folder.decode().split(' "." ')[1].replace('"', '')
+            # real_name = f'"{real_name}"'
+            # imap_server.select(real_name)
+            raw_name = folder.decode().split(' "." ')[1].replace('"', '')
+            encoded_name = imapclient.imap_utf7.encode(raw_name)
+            status, _ = imap_server.select(encoded_name)
+            if status != "OK":
+                _logger.error(f"Cannot select folder: {raw_name}")
+                continue
             for mssg in messg_ids:
                 result, data = imap_server.search(None, f'HEADER Message-ID "{mssg}"')
                 if data[0]:
@@ -882,24 +911,51 @@ class WebsiteOdooInbox(http.Controller):
 
     @http.route(['/mail/<int:index>/folder_edit'], type='http', auth="user", methods=['POST'], website=True)
     def odoo_folder_edit(self, index=0, **kw):
-        if kw.get('folder_id') and kw.get('folder_name'):
-            user_email = request.env.user.email
-            fetchmail_server = request.env['fetchmail.server'].search([
-                ('user_id', '=', request.env.user.id),
-                ('server_type', '=', 'imap')
-            ])
-            server = fetchmail_server[index]
-            folder_name = kw.get('folder_name')
-            parts = kw.get('folder_id').split('.')
-            parts[-1] = folder_name
-            new_folder_name = '.'.join(parts)
-            imap_server = server.connect()
-            old = kw.get('folder_id')
-            old_folder_name = f'"{old}"'
-            new_folder_name = f'"{new_folder_name}"'
-            res = imap_server.rename(old_folder_name, new_folder_name)
-            _logger.info(f"folder is {kw.get('folder_id')}, name is {new_folder_name} res {str(res)}")
-        return request.redirect(request.httprequest.referrer or '/mail/inbox')
+        old_raw = kw.get('folder_id')
+        new_short = kw.get('folder_name')
+
+        if not old_raw or not new_short:
+            return request.redirect(request.httprequest.referrer or '/mail/inbox')
+
+        # Build new full folder name
+        parts = old_raw.split('.')
+        parts[-1] = new_short
+        full_new_name = '.'.join(parts)
+
+        fetchmail_server = request.env['fetchmail.server'].search([
+            ('user_id', '=', request.env.user.id),
+            ('server_type', '=', 'imap')
+        ])
+        server = fetchmail_server[index]
+        imap_server = server.connect()
+
+        # Encode names for IMAP
+        old_encoded = imapclient.imap_utf7.encode(old_raw)
+        new_encoded = imapclient.imap_utf7.encode(full_new_name)
+
+        _logger.info(f"Renaming IMAP folder: {old_raw} → {full_new_name}")
+
+        try:
+            imap_server.rename(old_encoded, new_encoded)
+            _logger.info(f"Rename OK: {old_raw} → {full_new_name}")
+        except Exception as e:
+            _logger.error(f"IMAP rename failed: {e}")
+            return request.redirect(request.httprequest.referrer)
+
+        # 🔥 IMPORTANT: REFRESH IMAP LIST SO ODOO SEES THE NEW FOLDER
+        imap_server.select("INBOX")
+        imap_server.list()     # <--- REFRESH CACHE
+
+        # 🔥 Update Odoo database folder record
+        folder_rec = request.env['message.folder'].sudo().search([('name', '=', old_raw)], limit=1)
+        if folder_rec:
+            folder_rec.name = full_new_name
+
+        # Redirect to correct URL
+        new_url = f"/mail/{index}/folder/{full_new_name}"
+        return request.redirect(new_url)
+
+
 
     @http.route(['/mail/<int:index>/folder_delete'], type='http', auth="user", methods=['POST'], website=True)
     def odoo_folder_delete(self, index=0, **kw):
@@ -931,8 +987,14 @@ class WebsiteOdooInbox(http.Controller):
         status, folders = imap_server.list()
         folder_id = f'"{folder_id}"'
         for folder in folders:
-            real_name = folder.decode().split(' "." ')[1]
-            imap_server.select(real_name)
+            # real_name = folder.decode().split(' "." ')[1]
+            # imap_server.select(real_name)
+            raw_name = folder.decode().split(' "." ')[1].replace('"', '')
+            encoded_name = imapclient.imap_utf7.encode(raw_name)
+            status, _ = imap_server.select(encoded_name)
+            if status != "OK":
+                _logger.error(f"Cannot select folder: {raw_name}")
+                continue
             moved = False
             for mssg in messg_ids:
                 result, data = imap_server.search(None, f'HEADER Message-ID "{mssg}"')
