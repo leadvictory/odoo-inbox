@@ -1,0 +1,901 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <template id="language_selector">
+        <ul class="js_language_selector mb0 mt-3 list-inline" t-if="(request and request.is_frontend_multilang and len(languages) &gt; 1) or (website and (editable or translatable))">
+            <li class="list-inline-item">
+                <div class="dropup">
+                    <button class="btn btn-sm btn-light dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="true">
+                        <span t-esc="list(filter(lambda lg : lg[0] == lang, languages))[0][2].split('/').pop()" />
+                        <span class="caret ml4" />
+                    </button>
+                    <div class="dropdown-menu" role="menu">
+                        <t t-foreach="languages" t-as="lg">
+                            <a t-att-href="url_for(request.httprequest.path + '?' + keep_query(), lang_code=lg[0])" class="dropdown-item js_change_lang" t-att-data-url_code="lg[1]">
+                                <t t-esc="lg[2].split('/').pop()" />
+                            </a>
+                        </t>
+                    </div>
+                </div>
+            </li>
+        </ul>
+    </template>
+    <template id="odoo_inbox_layout" name="Odoo Inbox layout">
+        <t t-call="web.layout">
+            <t t-set="head_website">
+                <script type="text/javascript">
+                odoo.session_info = {
+                    is_superuser: <t t-esc="json.dumps(request.env.user._is_superuser())"/>,
+                    is_system: <t t-esc="json.dumps(request.env.user._is_system())"/>,
+                    is_website_user: <t t-esc="json.dumps(request.env.user._is_public())"/>,
+                    user_id: <t t-esc="json.dumps(request.env.user.id)" />,
+                    is_frontend: true,
+                };
+                odoo.is_odoo_inbox = true;
+                </script>
+                <t t-set="is_odoo_inbox" t-value="True" />
+                <!-- <t t-call-assets="web.assets_common" t-js="true" />
+                <t t-call-assets="web.assets_common" t-js="true" /> -->
+                <t t-call-assets="web.assets_frontend" t-js="false" />
+                <t t-call-assets="web.assets_frontend" t-css="false" />
+            </t>
+            <t t-set="head" t-value="head_website + (head or '')" />
+            <t t-set="pageName" t-value="'odoo_inbox_page'" />
+            <div id="wrapwrap" t-att-class="pageName or ''" t-attf-style="#{'background-image:url('+ request.env.user.inbox_theme_backgroud_image +');background-color: transparent;    background-size: cover;background-repeat: no-repeat;background-position: center;background-attachment: fixed;' if request.env.user.inbox_theme_backgroud_image else ''} #{'background-color: '+ request.env.user.inbox_theme_backgroud_color +';background-image: none;' if request.env.user.inbox_theme_backgroud_color else ''}">
+                <header>
+                </header>
+                <main>
+                    <t t-out="0" />
+                </main>
+                <footer>
+                </footer>
+            </div>
+        </t>
+    </template>
+    <!-- Sidebar -->
+    <template id="inbox_sidebar" name="Inbox Sidebar">
+        <div id="banner" t-att-class="color">
+            <div class="row">
+                <div class="col-2 col-md-2 col-lg-3">
+                    <div class="row">
+                        <div id="oe_applications" class="col-2 col-md-2 col-lg-2 px-2 mx-3">
+                            <a href="#" data-bs-toggle="dropdown" title="Menu">
+                                <i class="fa fa-th"/>
+                            </a>
+                            <ul class="dropdown-menu pull-left" role="menu">
+                            </ul>
+                        </div>
+                        <p class="col-7 col-md-7 col-lg-7 d-none d-md-block" id="inbox" t-attf-href="/mail/#{label}" t-esc="label and label.upper() or ''"/>
+                        <div id="burgercontainer" class="col-3col-md-3 col-lg-3 burger_container">
+                            <div id="burger2" class="pt-3 pb-4">
+                                <div class="burgx" style="transform: rotate(0deg) translate(0px,0px); width: 20px;"/>
+                                <div class="burgx2" style="width: 20px;"/>
+                                <div class="burgx3" style="width: 20px; transform: rotate(0deg) translate(0px, 0px)"/>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-4 col-md-5 col-lg-6">
+                    <div id="container-search">
+                        <form t-att-action="link+'/search_message'" role="search" method="get">
+                            <div id="searchimg">
+                                <img class="icon" src="/odoo_inbox/static/src/img/search.svg"/>
+                            </div>
+                            <input class="search" type="text" name="search" t-att-value="search if search else ''" placeholder="Search"/>
+                            <input type="date" name="from" t-att-value="start" />
+                            <input type="date" name="to" t-att-value="end" />
+                            <select name="size">
+                                <option value="all" t-att-selected="size == None or size == 'all'">All</option>
+                                <option value="small" t-att-selected="size == 'small'">Small</option>
+                                <option value="medium" t-att-selected="size == 'medium'">Medium</option>
+                                <option value="large" t-att-selected="size == 'large'">Large</option>
+                            </select>
+                            <button type="submit" class="search-email">Search</button>
+                        </form>
+                    </div>
+                </div>
+                <div class="col-6 col-md-5 col-lg-3 px-1">
+                    <div class="row">
+                        <div id="inbox_language_selector" class="col-5 col-md-4 col-lg-5 invisible">
+                            <t t-call="odoo_inbox.language_selector"/>
+                        </div>
+                        <div class="col-2 d-flex align-items-center ">
+                            <a href="#" data-bs-toggle="dropdown" title="Menu">
+                                <i class="fa fa-envelope text-light"></i>
+                            </a>
+                            <ul class="dropdown-menu pull-left" role="menu">
+                                <t t-set="server_index" t-value="0" />
+                                <t t-foreach="servers" t-as="server">
+                                    <li><a t-att-href="'/mail/'+str(server_index)+'/inbox'" t-esc="server.name"></a></li>
+                                    <t t-set="server_index" t-value="server_index+1" />
+                                </t>
+                            </ul>
+                        </div>
+                        <div id="oe_inbox_settings" class="col-1 col-md-2 col-lg-1 px-1 mx-2">
+                            <a href="#" data-bs-toggle="dropdown" title="Menu">
+                                <i class="fa fa-cog"/>
+                            </a>
+                            <ul class="dropdown-menu pull-left" role="menu">
+                                <div>
+                                    <hr/>
+                                    <div class="oe_inbox_setting_themes">
+                                        <div class="h5" aria-label="Theme">Theme</div>
+                                        <div class="inbox_theme_list row">
+                                            <div class="inbox_theme_image col-3 col-md-3 pl-2 pr-2" t-attf-data-src="/odoo_inbox/static/src/img/theme/theme1.jpg">
+                                                <img src="/odoo_inbox/static/src/img/theme/theme1.jpg" class="img-fluid"/>
+                                            </div>
+                                            <div class="inbox_theme_image col-3 col-md-3 pl-2 pr-2" t-attf-data-src="/odoo_inbox/static/src/img/theme/theme2.jpg">
+                                                <img src="/odoo_inbox/static/src/img/theme/theme2.jpg" class="img-fluid"/>
+                                            </div>
+                                            <div class="inbox_theme_image col-3 col-md-3 pl-2 pr-2" t-attf-data-src="/odoo_inbox/static/src/img/theme/theme3.jpg">
+                                                <img src="/odoo_inbox/static/src/img/theme/theme3.jpg" class="img-fluid"/>
+                                            </div>
+                                            <div class="inbox_theme_image col-3 col-md-3 pl-2 pr-2" t-attf-data-src="/odoo_inbox/static/src/img/theme/theme4.jpeg">
+                                                <img src="/odoo_inbox/static/src/img/theme/theme4.jpeg" class="img-fluid"/>
+                                            </div>
+                                            <div class="inbox_theme_image col-3 col-md-3 pl-2 pr-2" t-attf-data-src="/odoo_inbox/static/src/img/theme/theme5.jpeg">
+                                                <img src="/odoo_inbox/static/src/img/theme/theme5.jpeg" class="img-fluid"/>
+                                            </div>
+                                            <div class="inbox_theme_image col-3 col-md-3 pl-2 pr-2" t-attf-data-src="/odoo_inbox/static/src/img/theme/theme6.jpg">
+                                                <img src="/odoo_inbox/static/src/img/theme/theme6.jpg" class="img-fluid"/>
+                                            </div>
+                                            <div class="inbox_theme_image col-3 col-md-3 pl-2 pr-2" t-attf-data-src="/odoo_inbox/static/src/img/theme/theme7.jpeg">
+                                                <img src="/odoo_inbox/static/src/img/theme/theme7.jpeg" class="img-fluid"/>
+                                            </div>
+                                            <div class="inbox_theme_image col-3 col-md-3 pl-2 pr-2" t-attf-data-src="/odoo_inbox/static/src/img/theme/theme8.jpeg">
+                                                <img src="/odoo_inbox/static/src/img/theme/theme8.jpeg" class="img-fluid"/>
+                                            </div>
+                                            <div class="inbox_theme_color col-3 col-md-3 pl-2 pr-2" t-attf-data-src="#322222">
+                                                <div class="color_background" style="background-color: #322222">&amp;nbsp;</div>
+                                            </div>
+                                            <div class="inbox_theme_color col-3 col-md-3 pl-2 pr-2" t-attf-data-src="#F2F2F2">
+                                                <div class="color_background" style="background-color: #F2F2F2">&amp;nbsp;</div>
+                                            </div>
+                                            <div class="inbox_theme_color col-3 col-md-3 pl-2 pr-2" t-attf-data-src="#000000">
+                                                <div class="color_background" style="background-color: #000000">&amp;nbsp;</div>
+                                            </div>
+                                            <div class="inbox_theme_color col-3 col-md-3 pl-2 pr-2" t-attf-data-src="#875A7B">
+                                                <div class="color_background" style="background-color: #875A7B">&amp;nbsp;</div>
+                                            </div>
+                                            <div class="inbox_theme_color col-3 col-md-3 pl-2 pr-2" t-attf-data-src="#54678b">
+                                                <div class="color_background" style="background-color: #54678b">&amp;nbsp;</div>
+                                            </div>
+                                            <div class="inbox_theme_color col-3 col-md-3 pl-2 pr-2" t-attf-data-src="#f7dd6e">
+                                                <div class="color_background" style="background-color: #f7dd6e">&amp;nbsp;</div>
+                                            </div>
+                                            <div class="inbox_theme_color col-3 col-md-3 pl-2 pr-2" t-attf-data-src="#aed964">
+                                                <div class="color_background" style="background-color: #aed964">&amp;nbsp;</div>
+                                            </div>
+                                            <div class="inbox_theme_color col-3 col-md-3 pl-2 pr-2" t-attf-data-src="#f5c0d0">
+                                                <div class="color_background" style="background-color: #f5c0d0">&amp;nbsp;</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <hr/>
+                                </div>
+                            </ul>
+                        </div>
+                        <div class="collapse show web_user_profile col-2 col-md-2 col-lg-2 px-0" id="navbar-list-4" t-if="not user_id._is_public()">
+                            <ul class="navbar-nav">
+                                <li class="nav-item dropdown">
+                                    <a class="nav-link dropdown-toggle float-end" href="#" id="navbarDropdownMenuLink" role="button" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false" t-att-title="request.env.user.partner_id.name">
+                                        <div t-field="current_partner.image_256" t-options="{'widget': 'image', 'class': 'profile' }"/>
+                                    </a>
+                                    <div class="dropdown-menu" aria-labelledby="navbarDropdownMenuLink">
+                                        <a class="dropdown-item" t-attf-href="/my/account?redirect=#{request.httprequest.path}">
+                                            <t t-esc="current_partner.name"/>
+                                        </a>
+                                        <a t-if="current_partner.id in request.env.user.child_partner_ids.ids" class="dropdown-item" t-att-href="'/mail/filter/partner/' + str(request.env.user.partner_id.id)">Go to
+                                            <t t-esc="request.env.user.partner_id.name"/></a>
+                                        <a class="dropdown-item" t-attf-href="/web/session/logout?redirect=/">Log Out</a>
+                                    </div>
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div id="menu" t-attf-class="scroll scroll4 #{color}">
+            <div class="mail-compose-button">
+                <a role="button" href="#" class="btn btn-success btn-icon col-12 open_newmail">
+                    <span>Schreiben</span>
+                    <i class="fa fa-pencil"/>
+                </a>
+            </div>
+            <div class="head-menu">
+                <div t-att-class="'list active' if label == 'inbox' else 'list'">
+                    <a t-att-href="'/mail/'+str(index)+'/inbox'">
+                        <img class="list-img" src="/odoo_inbox/static/src/img/inbox.png"/>
+                        <p class="plist">Inbox</p>
+                        <t t-if="inbox_mssg_count">
+                            <span class="badge inbox_mssg_count">
+                                <t t-esc="inbox_mssg_count"/>
+                            </span>
+                        </t>
+                    </a>
+                </div>
+            </div>
+            <div class="head-menu d-flex flex-column" t-if="user_child_partner_ids">
+                <div>
+                    <h4>
+                        <p class="text-justify mb-1 mx-3">Filter:</p>
+                    </h4>
+                </div>
+                <div t-foreach="user_child_partner_ids" t-as="partner" t-att-class="'active-partner' if current_partner.id == partner.id else 'remain-partner'">
+                    <div class="list p-2" style="width: auto; height: auto">
+                        <a t-att-href="'/mail/filter/partner/' + str(partner.id)">
+                            <t t-if="partner.image_256">
+                                <img class="img img-fluid rounded other_email_user_icon" t-attf-src="/web/image?model=res.partner&amp;field=image_256&amp;id=#{partner.id}" t-att-title="partner.name" t-att-alt="partner.name"/>
+                                <!-- <div t-field="partner.image_256" t-options="{'widget': 'image', 'class': 'img img-fluid rounded other_email_user_icon' }" /> -->
+                            </t>
+                            <t t-else="">
+                                <img class="img img-fluid rounded other_email_user_icon" src="/odoo_inbox/static/src/img/demo_user_icom.png"/>
+                            </t>
+                            <span class="email_user_name" t-esc="partner.name"/>
+                        </a>
+                    </div>
+                </div>
+            </div>
+            <div class="head-menu" t-if="tag_ids">
+                <t t-foreach="tag_ids" t-as="tag">
+                    <div t-attf-class="list #{'active' if tag.id == existing_tag else ''}">
+                        <a t-attf-href="/mail/tag/#{tag.id}">
+                            <img class="list-img" src="/odoo_inbox/static/src/img/promos.png"/>
+                            <p class="plist">
+                                <t t-esc="tag.name"/>
+                            </p>
+                            <a href="" class="tag_setting_a" data-bs-toggle="modal" t-attf-data-bs-target="#tag_model_#{tag.id}">
+                                <img class="setting_img" src="/odoo_inbox/static/src/img/settings.png"/>
+                            </a>
+                        </a>
+                    </div>
+                </t>
+            </div>
+            <div class="head-menu" t-if="folder_ids">
+                <t t-set="counter" t-value="0"/>
+                <t t-foreach="folder_ids" t-as="folder">
+                    <t t-set="counter" t-value="counter + 1"/>
+                    <div t-attf-class="list #{'active' if folder['id'] == existing_folder else ''}">
+                        <a t-attf-href="/mail/#{index}/folder/#{folder['id']}?search=#{search}">
+                            <img class="list-img" src="/odoo_inbox/static/src/img/folder.png"/>
+                            <p class="plist">
+                                <t t-esc="folder['name']"/>
+                            </p>
+                            <span class="badge folder_mssg_count" t-attf-id="counter_fd_msg#{folder['id']}" t-att-style="'display:none;' if '0' == counter_fd_msgs.get(str(folder['id'])) else ''">
+                                <t t-esc="counter_fd_msgs.get(str(folder['id']))"/>
+                            </span>
+                            <a href="" class="folder_setting_a" data-bs-toggle="modal" t-attf-data-bs-target="#folder_model_#{counter}">
+                                <img class="setting_img" src="/odoo_inbox/static/src/img/settings.png"/>
+                            </a>
+                        </a>
+                    </div>
+                </t>
+            </div>
+        </div>
+        <!-- folder add temp -->
+        <t t-set="counter" t-value="0"/>
+        <t t-foreach="folder_ids" t-as="folder">
+                <t t-set="counter" t-value="counter + 1"/>
+                <div class="modal folder_model" t-attf-id="folder_model_#{counter}">
+                    <div class="modal-dialog">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title">Settings</h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal">&amp;times;</button>
+                            </div>
+                            <div class="modal-body">
+                                <button class="btn btn-light" t-att-data-folder="folder['id']" data-bs-toggle="modal" t-attf-data-bs-target="#folder_edit_#{counter}">Edit Name</button>
+                                <button class="btn btn-danger" t-att-data-folder="folder['id']" data-bs-toggle="modal" t-attf-data-bs-target="#folder_delete_#{counter}">Delete</button>
+                                <button type="button" class="btn btn-primary float-end" data-bs-dismiss="modal">Close</button>
+                            </div>
+                            <div class="modal-footer">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal folder_model_edit" t-attf-id="folder_edit_#{counter}">
+                    <div class="modal-dialog">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                            </div>
+                            <form t-att-action="'/mail/'+str(index)+'/folder_edit'" method="POST">
+                                <div class="modal-body">
+                                    <input type="text" class="form-control" name="folder_name" required="True" t-att-value="folder['name']" placeholder="Folder Name"/>
+                                    <input type="hidden" name="csrf_token" t-att-value="request.csrf_token()"/>
+                                    <input type="hidden" name="folder_id" t-att-value="folder['id']"/>
+                                </div>
+                                <div class="modal-footer">
+                                    <button type="button" class="btn btn-primary" data-bs-dismiss="modal">Cancel</button>
+                                    <button type="submit" class="btn btn-primary folder_edit_save_btn" data-bs-dismiss="modal">Save</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal folder_model_delete" t-attf-id="folder_delete_#{counter}">
+                    <div class="modal-dialog">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title">Delete
+                                    <t t-esc="folder['name']"/>?</h5>
+                            </div>
+                            <form t-att-action="'/mail/'+str(index)+'/folder_delete'" method="POST">
+                                <div class="modal-body">
+                                    <input type="hidden" name="csrf_token" t-att-value="request.csrf_token()"/>
+                                    <input type="hidden" name="folder_id" t-att-value="folder['id']"/>
+                                    <p class="text-center">Don't worry, the messages in
+                                        <t t-esc="folder['name']"/> will not be deleted.</p>
+                                </div>
+                                <div class="modal-footer">
+                                    <button type="button" class="btn btn-primary" data-bs-dismiss="modal">Cancel</button>
+                                    <button type="button" class="btn btn-primary folder_delete_save_btn" data-bs-dismiss="modal">Save</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </t>
+    </template>
+    <template id="address_dropdown" name="Tag dropdown">
+        <div class="address_dropdown">
+            <span>to me</span>
+            <a class="address_btn" t-att-data-message='mail_message["message_id"]' data-bs-toggle="dropdown">
+                <i class="fa fa-caret-down" />
+            </a>
+            <div class="dropdown-menu dropdown-menu-left address-dropdown-menu">
+                <table class="table table-borderless">
+                    <tbody>
+                        <tr>
+                            <td class="text-right">from: </td>
+                            <td><span class="email_from" t-esc="mail_message['email_from']" /></td>
+                        </tr>
+                        <tr>
+                            <td class="text-right">date: </td>
+                            <td><span class="email_date" t-esc="mail_message['date']" /></td>
+                        </tr>
+                        <tr>
+                            <td class="text-right">subject: </td>
+                            <td><span class="email_subject" t-esc="mail_message['subject']" /></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </template>
+    <template id="tag_dropdown" name="Tag dropdown">
+        <div class="tag_dropdown">
+            <a class="tags_btn" t-att-data-message='mail_message.id' data-bs-toggle="dropdown">
+                <i class="fa fa-tag fa-lg" />
+            </a>
+            <ul class="dropdown-menu dropdown-menu-right tag-dropdown-menu">
+                <t t-foreach="tag_ids" t-as="tag">
+                    <li>
+                        <label class="label-container">
+                            <t t-esc="tag.name" />
+                            <input type="checkbox" t-att-value="tag.id" t-att-checked="tag.id in mail_message.tag_ids.ids" />
+                            <span class="checkmark"></span>
+                        </label>
+                    </li>
+                </t>
+                <li class="create_new_tag">
+                    <input type="text" name="create_tag" value="" class="form-control create_tag_input" placeholder="Tag Name..." />
+                </li>
+                <li class="apply_button">
+                    <a class="btn btn-light mt8" t-att-data-message="mail_message.id">Apply</a>
+                </li>
+            </ul>
+        </div>
+    </template>
+    <template id="message_tag_list" name="Tag List">
+        <t t-if="mail_message.tag_ids">
+            <t t-foreach="mail_message.tag_ids" t-as="tag_id">
+                <span class="badge badge-secondary">
+                    <t t-esc="tag_id.name" />
+                    <a class="remove_tag" t-att-data-tag="tag_id.id" t-att-data-message='mail_message.id' title="Remove tag">
+                        <i class="fa fa-remove" />
+                    </a>
+                </span>
+            </t>
+        </t>
+    </template>
+    <template id="inbox_message_detail">
+        <div class="message__details">
+            <div class="pusher"/>
+            <div class="message__details__header">
+                <div class="h1 main_subject" t-att-data-subject="mail['subject']">
+                    <t t-esc="mail['subject']"/>
+                </div>
+            </div>
+            <div class="clearfix"/>
+            <div class="message__details__body">
+                <div class="message__details__icon">
+                    <div class="details_icon">
+                        <img src="/odoo_inbox/static/src/img/anon-avatar.png" alt="Avatar" class="img img-fluid rounded"/>
+                    </div>
+                </div>
+                <div class="body_content">
+                    <div class="body_mail_id_date">
+                        <div class="col-md-8 col-xs-8 detail_mail_addrss">
+                            <div class="message__details_user_name" t-if="mail['email_from']">
+                                <div class="message__details__body_user_name">
+                                    <t t-esc="mail['email_from'].split('&lt;')[0]"/>
+                                </div>
+                            </div>
+                            <div class="message_mail_address">
+                                <div class="user_address">
+                                    <!-- <t t-esc="mail.get('parent_id').email_from" /> -->
+                                    <div class="message_address_dropdown_details">
+                                        <t t-set="mail_message" t-value="mail"/>
+                                        <t t-call="odoo_inbox.address_dropdown" />
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="date_content col-md-4">
+                            <span t-esc="mail_time"/>
+                        </div>
+                    </div>
+                    <t t-if="mail['attachments']">
+                        <div class="attachment_content">
+                            <t t-foreach="mail['attachments']" t-as="attachment">
+                                <a class="o_image" t-attf-href="/mail/attachment/#{attachment.id}/download" target="_blank" t-att-data-mimetype="attachment.mimetype" t-attf-data-src="/web/image/#{attachment.id}">
+                                </a>
+                                <t t-esc="attachment.name" />
+                            </t>
+                        </div>
+                    </t>
+                    <div class="message__details__body__content col-md-12 col-xs-12">
+                        <p t-raw="mail['body']"/>
+                    </div>
+                    <!--<div class="clearfix" />-->
+                    <!--<div class="col-sm-12 col-xs-12">-->
+                    <!--    <div class="row">-->
+                    <!--        <t t-foreach="mail.get('parent_id').attachment_ids" t-as="attachment">-->
+                    <!--            <div class="attch_cnt col-sm-3 col-xs-6 first_mssg_attch">-->
+                    <!--                <div class="attch_img">-->
+                    <!--                    <a class="o_image" t-attf-href="/mail/attachment/#{attachment.id}/download" target="_blank" t-att-data-mimetype="attachment.mimetype" t-attf-data-src="/web/image/#{attachment.id}">-->
+                    <!--                    </a>-->
+                    <!--                </div>-->
+                    <!--                <div class="attch_name">-->
+                    <!--                    <a t-attf-href="/mail/attachment/#{attachment.id}/download" target="_blank">-->
+                    <!--                        <t t-esc="attachment.name" />-->
+                    <!--                    </a>-->
+                    <!--                </div>-->
+                    <!--            </div>-->
+                    <!--        </t>-->
+                    <!--    </div>-->
+                    <!--</div>-->
+                </div>
+                <!--<div class="message_tag_list_details_body ml16 mb16" t-att-data-message="mail.get('parent_id')">-->
+                <!--    <t t-set="mail_message" t-value="mail.get('parent_id')" />-->
+                <!--    <t t-call="odoo_inbox.message_tag_list" />-->
+                <!--</div>-->
+            </div>
+            <div class="clearfix"/>
+            <!-- content position chnage from here to upper 513 line-->
+            <div class="message__details__footer">
+                <div class="message__details__icon">
+                    <div class="details_icon" t-field="user_id.image_256" t-options="{'widget': 'image', 'class': 'rounded' }"/>
+                </div>
+                <div class="body_content">
+                    <div class="body_mail_id_date justify-content-between">
+                        <div class="col-xs-4 detail_mail_addrss">
+                            <span>
+                                <i class="fa fa-reply"/>Reply
+                            </span>
+                        </div>
+                        <div class="col-xs-4 print_email">
+                            <span>
+                                <i class="fa fa-print"/>Print
+                            </span>
+                        </div>
+                        <div class="date_content col-xs-4">
+                            <div class="message_forwad open_newmail">
+                                <span>
+                                    <i class="fa fa-share"/>Forward
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="message__details__footer_reply" style="display:none;">
+                <form t-att-action="'/mail/'+str(index)+'/message_post'" method="post" class="form-horizontal reply-mail-form" enctype="multipart/form-data">
+                    <div class="body_mail_reply justify-content-between">
+                        <div class="container row">
+                            <div class="col-md-10 detail_mail_reply_send">
+                                <div class="reply_send_btn col-xs-1 mt-1">
+                                    <input type="submit" value="SEND" title="Send" class="btn"/>
+                                </div>
+                                <span class="select-wrapper mt-1">
+                                    <input name="attachments" type="file" class="file form-control image_src" multiple="true" title="Attach files"/>
+                                </span>
+                                <output class="output_result"/>
+                            </div>
+                            <div class="col-md-2 date_content mt-1">
+                                <a class="reply_delete_bttn" title="Discart draft">
+                                    <img src="/odoo_inbox/static/src/img/d_draft.png"/>
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="reply_mail_body">
+                        <input type="hidden" name="csrf_token" t-att-value="request.csrf_token()"/>
+                        <input type="hidden" name="subject" t-att-value="mail['subject']"/>
+                        <div class="message__details__icon">
+                            <div class="details_icon" t-field="user_id.image_256" t-options="{'widget': 'image', 'class': 'rounded' }"/>
+                        </div>
+                        <select name="partners" id="reply_compose_partner" class="form-control" multiple="multiple" placeholder="To" required="required">
+                        </select>
+                        <div class="cc-list">
+                            <select name="reply_cc_partners" id="reply_cc_compose_partner" class="form-control" multiple="multiple" placeholder="Cc">
+                            </select>
+                        </div>
+                        <div class="bcc-list">
+                            <select name="reply_bcc_partners" id="reply_bcc_compose_partner" class="form-control" multiple="multiple" placeholder="Bcc">
+                            </select>
+                        </div>
+                        <div class="reply_body_content">
+                            <input type="hidden" name="message_id" t-att-value="mail['message_id']"/>
+                            <input type="hidden" name="email" t-att-value="mail['from']"/>
+                            <div class="user_mail_reply">
+                                <div class="col-xs-12 detail_mail_addrss">
+                                    <div class="message__details_user_name">
+                                        <span style="display:none"/>
+                                        <span class="draft_to">Draft</span>
+                                        <span>to</span>
+                                    </div>
+                                </div>
+                                <!-- <div class="date_content col-xs-2">
+                                        <a class="message_forwad open_newmail" title="Pop out reply">
+                                            <img src="/odoo_inbox/static/src/img/forwad_mail.png" />
+                                        </a>
+                                    </div> -->
+                            </div>
+                            <div class="dropup o_composer_mention_dropdown">
+                                <ul class="dropdown-menu" aria-labelledby="dropdownMailMentionMenu">
+                                </ul>
+                            </div>
+                            <textarea name="body" class="form-control load_editor1 gmail_compose_message" required="True" t-att-data-body="mail[&quot;body&quot;]" data-emojiable="true"/>
+                            <input type="hidden" name="users_ids"/>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </template>
+    <template id="message_detail_template">
+        <div class="message">
+            <div t-att-class="'message__summary' if mail['is_read'] else 'message__summary gmail_unread'" t-att-data-message="mail['message_id']">
+                <div class="select_checkbox">
+                    <label>
+                        <input type="checkbox" class="individual"/>
+                    </label>
+                </div>
+                <div class="message__summary__icon">
+                    <div class="icon">
+                        <img src="/odoo_inbox/static/src/img/anon-avatar.png" alt="Avatar" class="img img-fluid rounded"/>
+                    </div>
+                </div>
+                <div class="message__summary__title gmail_message_link_tr">
+                    <t t-if="mail['email_from'] and not 'sent' in label.lower()">
+                        <a t-esc="mail['email_from'].split('&lt;')[0]"/>
+                    </t>
+                    <t t-if="mail['to'] and 'sent' in label.lower()">
+                        <a t-esc="mail['to'].split('&lt;')[0]"/>
+                    </t>
+                    <div class="message__summary__body gmail_message_link_tr" t-att-data-subject="mail['subject']">
+                        <a t-esc="mail['subject']"/>
+                        <div class="message_tag_list_details_body" t-att-data-message="mail['message_id']">
+                            <t t-set="mail_message" t-value="mail"/>
+                        </div>
+                    </div>
+                    <div style="color: black;">
+                        <t t-if="'date' in mail">
+                            <span t-esc="mail['date']" />
+                        </t>
+                        <t t-if="len(mail['attachments']) > 0">
+                            <i class="fa fa-file" />
+                        </t>
+                    </div>
+                </div>
+            </div>
+            <div class="grower"/>
+        </div>
+    </template>
+    <template id="inbox" name="Mailbox">
+        <t t-call="odoo_inbox.odoo_inbox_layout">
+            <div id="odoo_wrap" class="odoo-inbox-wrap">
+                <t t-call="odoo_inbox.inbox_sidebar" />
+                <div id="page">
+                    <div class='wrapper' id='wrapper' t-if="not messages">
+                        <div t-attf-class="#{label}_empty" />
+                    </div>
+                    <div t-attf-class='wrapper #{color}' id='wrapper'>
+                        <!-- select multiple functionality -->
+                        <t t-if="messages">
+                            <div class="mail-option">
+                                <div class="mail-multiple-message-options row">
+                                    <div class="col-5 col-md-3 col-lg-8 text-left">
+                                        <div class="chk-all">
+                                            <input type="checkbox" class="selectall mail-checkbox mail-group-checkbox" title="Select" />
+                                            <div class="btn-group">
+                                                <a id="dropdownMenuLink" class="btn top_icon" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                                                    <img class="message_snooze" src="/odoo_inbox/static/src/img/dropdown.png" type="button" />
+                                                    &amp;nbsp;
+                                                    <i class="fa fa-angle-down"></i>
+                                                </a>
+                                                <div class="dropdown-menu" aria-labelledby="dropdownMenuLink">
+                                                    <a class="dropdown-item all_mssg_starred">Starred</a>
+                                                    <a class="dropdown-item all_mssg_unstarred">Unstarred</a>
+                                                    <a class="dropdown-item all_mssg_read">Read</a>
+                                                    <a class="dropdown-item all_mssg_unread">Unread</a>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="btn-group hidden-phone all_snooze_bttn" style="display: none;position:unset;">
+                                            <a id="dropdown_separate_snoze" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false" class="btn top_icon" title="Snooze">
+                                                <img class="message_snooze" src="/odoo_inbox/static/src/img/all_snooze.png" type="button" />
+                                            </a>
+                                            <div class="dropdown-menu gmail_snooze_child_menu" aria-labelledby="dropdown_separate_snoze">
+                                                <div class="col-md-12">
+                                                    <h5>Snooz Until</h5>
+                                                </div>
+                                                <hr />
+                                                <div class="col-md-12">
+                                                    <a class="snooze_later_today" href="#">
+                                                        <span class="pull-left">Later Today</span>
+                                                        <span class="float-end" t-esc="request.env['mail.message'].get_messages_time()"></span>
+                                                    </a>
+                                                </div>
+                                                <div class="clearfix" />
+                                                <div class="col-md-12">
+                                                    <a class="snooze_tomorrow" href="#">
+                                                        <span class="pull-left">Tomorrow</span>
+                                                        <span class="float-end" t-esc="request.env['mail.message'].get_messages_time('tomorrow')"></span>
+                                                    </a>
+                                                </div>
+                                                <div class="clearfix" />
+                                                <div class="col-md-12">
+                                                    <a class="snooze_nexweek" href="#">
+                                                        <span class="pull-left">Next Week</span>
+                                                    </a>
+                                                </div>
+                                                <div class="clearfix" />
+                                                <hr />
+                                                <div class="col-md-12 snooze">
+                                                    <div class="row">
+                                                        <div class="col-md-12">
+                                                            <p>Pick Date &amp; Time</p>
+                                                            <div class='input-group date snooze_custome_time' id="snoozedatePicker" data-target-input="nearest">
+                                                                <input type='text' name="snooze_date" class="form-control datetimepicker-input create_snooze_input" data-bs-target="#snoozedatePicker" />
+                                                                <div class="input-group-append" data-bs-target="#snoozedatePicker" data-bs-toggle="datetimepicker">
+                                                                    <div class="input-group-text">
+                                                                        <i class="fa fa-calendar"></i>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div class="row">
+                                                        <div class="col-md-12 mt-1">
+                                                            <a class="snooze_date_submit btn btn-light btn-sm">SAVE</a>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="btn-group all_move_to_bttn" style="display: none">
+                                            <a data-bs-toggle="dropdown" href="#" class="btn mini blue top_icon" title="Move to">
+                                                <img class="gmail_move_to_folder" src="/odoo_inbox/static/src/img/move_to.png" type="button" />
+                                            </a>
+                                            <ul class="dropdown-menu dropdown-menu-left folder-dropdown-menu">
+                                                <li>
+                                                    Move to ...
+                                                </li>
+                                                <hr style="margin-top: 0px;margin-bottom: 0px;padding: 0 0;" />
+                                                <li t-if="label != 'inbox'">
+                                                    <a class="movetofolder" data-folder_id="move_to_inbox">
+                                                        Inbox
+                                                    </a>
+                                                </li>
+                                                <hr style="margin-top: 0px;margin-bottom: 0px;padding: 0 0;" />
+                                                <t t-foreach="folder_ids" t-as="folder">
+                                                    <li t-if="folder['id'] != existing_folder">
+                                                        <a class="movetofolder" t-att-data-folder_id="folder['id']">
+                                                            <t t-esc="folder['name']"/>
+                                                        </a>
+                                                    </li>
+                                                </t>
+                                                <li class="apply_button create_new_folder">
+                                                    <form action="/mail/folder/create" method="POST">
+                                                        <input type="text" name="create_folder" value="" class="form-control create_folder_input" placeholder="Folder Name..." />
+                                                        <input type="hidden" name="csrf_token" t-att-value="request.csrf_token()" />
+                                                        <input type="hidden" name="message_id" />
+                                                        <button type="submit" class="btn btn-light mt8">Apply</button>
+                                                    </form>
+                                                </li>
+                                            </ul>
+                                        </div>
+                                        <div class="btn-group all_mssg_to_trash" style="display: none" t-if="label != 'trash'">
+                                            <a href="#" class="btn mini blue top_icon" title="Delete">
+                                                <img src="/odoo_inbox/static/src/img/all_movetotrash.png" type="button" />
+                                            </a>
+                                        </div>
+                                        <div class="btn-group all_mssg_to_tag" style="display: none">
+                                            <div class="message_tag_dropdown_details">
+                                                <div class="tag_dropdown">
+                                                    <a class="btn tags_btn top_icon" data-bs-toggle="dropdown" title="Tags">
+                                                        <img class="gmail_move_to_folder" src="/odoo_inbox/static/src/img/label.png" type="button" />
+                                                    </a>
+                                                    <ul class="dropdown-menu dropdown-menu-left tag-dropdown-menu">
+                                                        <t t-foreach="tag_ids" t-as="tag">
+                                                            <li>
+                                                                <label class="label-container">
+                                                                    <t t-esc="tag.name" />
+                                                                    <input type="checkbox" t-att-value="tag.id" />
+                                                                    <span class="checkmark"></span>
+                                                                </label>
+                                                            </li>
+                                                        </t>
+                                                        <li class="create_new_tag">
+                                                            <input type="text" name="create_tag" value="" class="form-control create_tag_input" placeholder="Tag Name..." />
+                                                        </li>
+                                                        <li class="apply_button">
+                                                            <a class="btn btn-light mt8">Apply</a>
+                                                        </li>
+                                                    </ul>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="btn-group all_mssg_to_done" style="display: none" t-if="label != 'done'">
+                                            <a href="#" title="Mark as Done" class="btn mini blue top_icon">
+                                                <img class="gmail_move_to_folder" src="/odoo_inbox/static/src/img/done.png" type="button" />
+                                            </a>
+                                        </div>
+                                    </div>
+                                    <div class="col-8 col-md-7 col-lg-3 text-right">
+                                        <ul t-if="pager['page_count'] > 1" t-attf-class="#{ classname or '' } pagination m-1 #{_classes}" t-att-style="style or None">
+                                            <li t-attf-class="page-item #{'disabled' if pager['page']['num'] == 1 else ''}">
+                                                <a t-att-href=" pager['page_previous']['url'] if pager['page']['num'] != 1 else None" class="page-link"><i class="fa fa-angle-left fa-2"></i></a>
+                                            </li>
+                                            <t t-foreach="pager['pages']" t-as="page">
+                                                <li t-attf-class="page-item #{'active' if page['num'] == pager['page']['num'] else ''}"> <a t-att-href="page['url']" class="page-link" t-out="page['num']"></a></li>
+                                            </t>
+                                            <li t-attf-class="page-item #{'disabled' if pager['page']['num'] == pager['page_count'] else ''}">
+                                                <a t-att-href="pager['page_next']['url'] if pager['page']['num'] != pager['page_count'] else None" class="page-link"><i class="fa fa-angle-right fa-2"></i></a>
+                                            </li>
+                                        </ul>
+                                    </div>
+                                    <div class="col-2 col-md-1 text-center">
+                                        <div class="inbox_pane_mode">
+                                            <div class="btn-group">
+                                                <button type="button" class="btn">
+                                                    <i t-attf-class="fa #{'fa-bars' if default_inbox_pane_type == 'none' else 'fa-columns'}" />
+                                                </button>
+                                                <button type="button" class="btn dropdown-toggle dropdown-toggle-split pl-1 pr-1" id="dropdownPaneViewSplit" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false" data-reference="parent">
+                                                    <span class="sr-only">Toggle Split Dropdown</span>
+                                                </button>
+                                                <div class="dropdown-menu dropdown-menu-right dropdown_pane_type_view_select" aria-labelledby="dropdownPaneViewSplit">
+                                                    <a class="dropdown-item" href="#" data-split-type="none">No Split</a>
+                                                    <a class="dropdown-item" href="#" data-split-type="vertical">Vertical split</a>
+                                                    <a class="dropdown-item" href="#" data-split-type="horizontal">Horizontal split</a>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="mail-single-message-options row d-none">
+                                    <div class="col-1">
+                                        <a href="#" class="single_message_back text-white">
+                                            <i class="fa fa-arrow-left">
+                                            </i>
+                                        </a>
+                                    </div>
+                                    <div class="col-md-9">
+                                    </div>
+                                </div>
+                            </div>
+                            <div t-attf-class="inbox_mail_container #{default_inbox_pane_type}-resize">
+                                <div class="inbox_mail_list scroll4">
+                                    <t t-foreach="messages" t-as="mail">
+                                        <t t-call="odoo_inbox.message_detail_template" />
+                                    </t>
+                                </div>
+                                <div class="inbox_mail_spliter">
+                                </div>
+                                <div class="inbox_mail_main_body scroll4">
+                                    <div class="inbox_mail_message_details">
+                                        <h4 class="mt-4 text-center">No conversations selected</h4>
+                                        <div class="col-10 text-center offset-1">
+                                            <img src="/odoo_inbox/static/src/img/conversion_view.svg" class="img-fluid" />
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </t>
+                    </div>
+                </div>
+                <!-- BOX NEW MAIL -->
+                <div id="newmail" t-att-class="color">
+                    <form t-att-action="'/sent_mail/'+str(index)+'/mail'" method="post" class="form-horizontal" enctype="multipart/form-data">
+                        <input type="hidden" name="csrf_token" t-att-value="request.csrf_token()" />
+                        <div id="header-newmail" class="header">
+                            <div class="title">Neue Nachricht
+                                <div class="right">
+                                    <a class="button-grey button-small button-minimize" title="Minimize"><i class='fa fa-minus'></i></a>
+                                    <a class="button-grey button-small button-fullscreen" title="Expand to full-screen">
+                                        <i class="fa fa-expand"></i>
+                                    </a>
+                                    <a class="button-grey button-small button-exit" title="Close">
+                                        <i class="fa fa-times"></i>
+                                    </a>
+                                </div>
+                            </div>
+                            <div class="min-hide">
+                                <div class="msg-recipients">
+                                    <div class="to-list">
+                                        <select name="partners" id="compose_partner" class="form-control" multiple="multiple" placeholder="To" oninvalid="this.setCustomValidity('Please specify at least one recipient!')" oninput="setCustomValidity('')">
+                                        </select>
+                                        <span class="arrow"></span>
+                                    </div>
+                                    <div class="cc-list collapse">
+                                        <select name="cc_partners" id="cc_compose_partner" class="form-control" multiple="multiple" placeholder="Cc">
+                                        </select>
+                                    </div>
+                                    <div class="bcc-list collapse">
+                                        <select name="bcc_partners" id="bcc_compose_partner" class="form-control" multiple="multiple" placeholder="Bcc">
+                                        </select>
+                                    </div>
+                                    <div class="to-tags">
+                                        <select name="tags" id="compose_tags" class="form-control" multiple="multiple" placeholder="To">
+                                        </select>
+                                    </div>
+                                </div>
+                                <input type="text" name="subject" id="gmail_compose_subject" class="input-large" placeholder="Subject" required="required" oninvalid="this.setCustomValidity(' Please specify the subject!')" oninput="setCustomValidity('')"></input>
+                                <div class="inbox_document">
+                                    <div class="model-list">
+                                        <select name="document_model" id="document_model" class="form-control" placeholder="Select Document">
+                                            <option value="0">Select Document</option>
+                                            <t t-foreach="document_models" t-as="model">
+                                                <option t-att-value="model.model" t-esc="model.name"></option>
+                                            </t>
+                                        </select>
+                                    </div>
+                                    <div class="model-record-list">
+                                        <select name="document_model_record" id="document_model_records" class="form-control d-none" placeholder="Select Record">
+                                            <option value="">Select Record</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="model-followers">
+                                    <div id="document_model_record_followers" class="d-none">
+                                    </div>
+                                </div>
+                            </div>
+                            <div id="originalContent" class="d-none"><span class="user_signature" t-esc="request.env.user.signature"/></div>
+                            <textarea name="body" class="form-control load_editor compose_message_popup gmail_compose_message" required="True" onfocus="this.value=''" ><span><br/><br/><br/><t t-esc="request.env.user.signature"/></span></textarea>
+                        </div>
+                        <div class="menu footer min-hide">
+                            <button class="btn" type="submit" title="Send">Send</button>
+                            <span class="compose_attach">
+                                <input type="file" name="compose_attachments" id="file-2" class="inputfile inputfile-2 compose_attach_file" data-multiple-caption="{count} files selected" multiple=""/>
+                                <label for="file-2"><i class="fa fa-paperclip"></i></label>
+                                <div class="clearfix"/>
+                            </span>
+                            <output id="compose_attach_result" />
+                            <div class="compose_select_templates d-none">
+                                <select name="compose_template" class="form-control" id="document_compose_mail_template">
+                                    <option value="">Select template</option>
+                                </select>
+                            </div>
+                             <div class="compose_save_template">
+                                <span class="btn_compose_save_template btn btn-secondary btn-sm mt-1 ml-2 d-none" id="btn_compose_save_template"><i class="fa fa-save"/> Save template</span>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </t>
+    </template>
+</odoo>

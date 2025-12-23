@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_users_form_inbo" model="ir.ui.view">
+        <field name="name">res.users.form.mail</field>
+        <field name="model">res.users</field>
+        <field name="inherit_id" ref="base.view_users_form" />
+        <field name="arch" type="xml">
+            <data>
+                <xpath expr="//page[last()]" position="after">
+                    <page string="Inbox Settings">
+                        <group>
+                            <group>
+                                <field name="inbox_default_pane_view_type" />
+                            </group>
+                            <group>
+                                <field name="child_partner_ids" widget="many2many_tags"/>
+                            </group>
+                        </group>
+                    </page>
+                </xpath>
+            </data>
+        </field>
+    </record>
+</odoo>

@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_email_server_form_inherit" model="ir.ui.view">
+        <field name="name">fetchmail.server.form</field>
+        <field name="model">fetchmail.server</field>
+        <field name="inherit_id" ref="mail.view_email_server_form" />
+        <field name="arch" type="xml">
+            <xpath expr="//page[@name='advanced_options']//group//field[@name='original']" position="after">
+                <field name="author_id" />
+            </xpath>
+            <xpath expr="//header" position="inside">
+                <button string="Fetch Sent Mail" type="object" name="fetch_sent_mail" states="done"/>
+            </xpath>
+        </field>
+    </record>
+    <record id="view_message_form_inherit" model="ir.ui.view">
+        <field name="name">mail.message.form</field>
+        <field name="model">mail.message</field>
+        <field name="inherit_id" ref="mail.mail_message_view_form" />
+        <field name="arch" type="xml">
+            <xpath expr="//field[@name='record_name']" position="after">
+                <field name="partner_followers" widget="many2many_tags" />
+                <field name="tag_ids" widget="many2many_tags" />
+                <field name="folder_id" />
+                <field name="msg_unread" />
+                <field name="message_label" />
+            </xpath>
+            <field name="partner_ids" position="after">
+                <field name="email_cc_ids" widget="many2many_tags" />
+                <field name="email_bcc_ids" widget="many2many_tags" />
+            </field>
+        </field>
+    </record>
+    <record id="res_config_settings_view_form" model="ir.ui.view">
+        <field name="name">res.config.settings</field>
+        <field name="model">res.config.settings</field>
+        <field name="inherit_id" ref="mail.res_config_settings_view_form" />
+        <field name="arch" type="xml">
+            <xpath expr="//div[@id='email_servers_setting']" position="after">
+                <div class="col-12 col-lg-6 o_setting_box">
+                    <div class="o_setting_right_pane">
+                        <label for="sent_mail_days" />
+                        <br/>
+                        <field name="sent_mail_days" />
+                    </div>
+                </div>
+            </xpath>
+        </field>
+    </record>
+</odoo>
