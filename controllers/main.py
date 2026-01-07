@@ -84,15 +84,17 @@ class WebsiteOdooInbox(http.Controller):
         server = fetchmail_server[index]
         imap_server = server.connect()
         status, capabilities = imap_server.capability()
-        _logger.info(f"capability is {str(capabilities)}")
+        # _logger.info(f"capability is {str(capabilities)}")
         # if label is None:
         #     imap_server.select()
         # else:
         #     _label = f'"{label}"'
         #     imap_server.select(_label)
         if label:
-            folder_encoded = imapclient.imap_utf7.encode(label)
-            status, _ = imap_server.select(folder_encoded)
+            # folder_encoded = imapclient.imap_utf7.encode(label)
+            # status, _ = imap_server.select(folder_encoded)
+            imap_label = "INBOX" if label.lower() == "inbox" else label
+            imap_server.select(f'"{imap_label}"')
         else:
             status, _ = imap_server.select()
 
@@ -173,21 +175,65 @@ class WebsiteOdooInbox(http.Controller):
         folder_ids = []
         counter_fd_msgs = {}
             
-        for folder_name in folders:
-            if b'\\HasNoChildren' in folder_name:
-                # real_name = folder_name.decode().split(' "." ')[1].replace("\"", "")
-                # imap_server.select(real_name)
-                real_name = folder_name.decode().split(' "." ')[1].replace("\"", "")
-                encoded = imapclient.imap_utf7.encode(real_name)
-                status, _ = imap_server.select(encoded)
+        # for folder_name in folders:
+        #     if b'\\HasNoChildren' in folder_name:
+        #         # real_name = folder_name.decode().split(' "." ')[1].replace("\"", "")
+        #         # imap_server.select(real_name)
+        #         real_name = folder_name.decode().split(' "." ')[1].replace("\"", "")
+        #         encoded = imapclient.imap_utf7.encode(real_name)
+        #         status, _ = imap_server.select(encoded)
 
-                if status != "OK":
-                    _logger.error(f"Cannot select folder: {real_name}")
-                    continue
-                name = folder_name.split(b'.')[-1].decode()
-                folder = { 'name': name.replace("\"", ""), 'id': real_name }
-                folder_ids.append(folder)
-                counter_fd_msgs.update({str(real_name): '0'})
+        #         if status != "OK":
+        #             _logger.error(f"Cannot select folder: {real_name}")
+        #             continue
+        #         name = folder_name.split(b'.')[-1].decode()
+        #         folder = { 'name': name.replace("\"", ""), 'id': real_name }
+        #         folder_ids.append(folder)
+        #         counter_fd_msgs.update({str(real_name): '0'})
+
+        import re
+
+        IMAP_LIST_RE = re.compile(
+            r'^\((?P<flags>.*?)\)\s+"(?P<delim>.*?)"\s+(?P<name>.+)$'
+        )
+
+        for folder_name in folders:
+            raw = folder_name.decode(errors="ignore")
+            _logger.info("RAW IMAP LIST: %s", raw)
+
+            m = IMAP_LIST_RE.match(raw)
+            if not m:
+                _logger.error("Unparseable IMAP LIST line: %s", raw)
+                continue
+
+            real_name = m.group("name").strip()
+
+            # Remove surrounding quotes if present
+            if real_name.startswith('"') and real_name.endswith('"'):
+                real_name = real_name[1:-1]
+
+            if not real_name:
+                _logger.error("Empty mailbox name from: %s", raw)
+                continue
+
+            # RFC rule: quote ONLY if space is present
+            select_arg = f'"{real_name}"' if " " in real_name else real_name
+
+            _logger.info("IMAP selecting folder: %s", select_arg)
+
+            status, _ = imap_server.select(select_arg)
+            if status != "OK":
+                _logger.error("Cannot select folder: %s", select_arg)
+                continue
+
+            folder_ids.append({
+                "name": real_name.split(".")[-1],
+                "id": real_name,
+            })
+            counter_fd_msgs[real_name] = "0"
+
+
+
 
         inbox_domain = counter_domain + [('msg_unread', '=', False), ('message_label', 'in', ['inbox', 'starred']), ('folder_id', '=', False)]
         starred_domain = counter_domain + [('message_label', '=', 'starred')]
