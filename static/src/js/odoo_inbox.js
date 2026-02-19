@@ -188,39 +188,57 @@ odoo.define('odoo_inbox.odoo_inbox', function(require) {
          *
          * @private
          * @param {Event} ev
-         */
-        _onOeApplicationsHovered: function(ev) {
+        */
+        _onOeApplicationsHovered: function (ev) {
             var self = this;
             var menuInfo = [];
+            console.log("SSession_info:", odoo.session_info);
+            console.log("User context:", odoo.session_info.user_context);
+            console.log("User lang:", odoo.session_info.user_context.lang);
+
             this._rpc({
                 model: 'ir.ui.menu',
                 method: 'load_menus_root',
                 args: [],
-            }).then(function(result) {
+                kwargs: {
+                    context: {
+                        lang: odoo.session_info.user_context.lang,
+                    },
+                },
+            }).then(function (result) {
+
+                console.log("RPC result:", result);
+                console.log("Returned menu names:");
+
                 result.children.forEach((e, i) => {
-                    if (e.web_icon_data){
+                    console.log("Menu:", e.name);
+
+                    if (e.web_icon_data) {
                         var decode_icon = atob(e.web_icon_data);
                         try {
                             var iconFormat = decode_icon.split(';')[0].split('/')[4].split(" ")[0].split('"')[0];
                         } catch (e) {
                             var iconFormat = 'png';
                         }
+
                         menuInfo.push({
-                            'id': e.id,
-                            'action': e.action,
-                            'parent_id': e.parent_id,
-                            'iconFormat': iconFormat,
-                            'name': e.name,
-                            'web_icon_data': e.web_icon_data,
-                            'icon': decode_icon,
-                        })
+                            id: e.id,
+                            action: e.action,
+                            parent_id: e.parent_id,
+                            iconFormat: iconFormat,
+                            name: e.name,
+                            web_icon_data: e.web_icon_data,
+                            icon: decode_icon,
+                        });
                     }
                 });
+
                 self.$('#oe_applications .dropdown-menu').html(
                     $(qweb.render('inbox.oe_applications_menu', { menu_data: menuInfo }))
                 );
             });
         },
+
         _onClickPaneTypeSelect: function(ev) {
             var split_data = $(ev.currentTarget).data('split-type');
             $('.inbox_mail_container').removeClass('horizontal-resize');

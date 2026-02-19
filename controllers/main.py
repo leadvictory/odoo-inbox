@@ -81,7 +81,17 @@ class WebsiteOdooInbox(http.Controller):
             ('user_id', '=', request.env.user.id),
             ('server_type', '=', 'imap')
         ])
+        if not fetchmail_server:
+            return request.not_found()  # or handle gracefully
+
+        if index >= len(fetchmail_server):
+            index = 0  # fallback to first server
+
         server = fetchmail_server[index]
+
+        if not server:
+            return request.not_found()
+
         imap_server = server.connect()
         status, capabilities = imap_server.capability()
         # _logger.info(f"capability is {str(capabilities)}")
