@@ -433,7 +433,7 @@
                             </div>
                         </div>
                         <div class="date_content col-md-4">
-                            <span t-esc="mail_time"/>
+                            <span t-esc="format_datetime(mail_time)"/>
                         </div>
                     </div>
                     <t t-if="mail['attachments']">
