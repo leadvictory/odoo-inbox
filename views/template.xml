@@ -509,7 +509,11 @@
                                     <input type="submit" value="SEND" title="Send" class="btn"/>
                                 </div>
                                 <span class="select-wrapper mt-1">
-                                    <input name="attachments" type="file" class="file form-control image_src" multiple="true" title="Attach files"/>
+                                    <input name="attachments"
+                                        type="file"
+                                        class="file form-control image_src"
+                                        multiple
+                                        title="Attach files"/>
                                 </span>
                                 <output class="output_result"/>
                             </div>
@@ -526,14 +530,14 @@
                         <div class="message__details__icon">
                             <div class="details_icon" t-field="user_id.image_256" t-options="{'widget': 'image', 'class': 'rounded' }"/>
                         </div>
-                        <select name="partners" id="reply_compose_partner" class="form-control" multiple="multiple" placeholder="To" required="required">
+                        <select name="partners" id="reply_compose_partner" class="form-control" multiple="multiple" placeholder="To">
                         </select>
                         <div class="cc-list">
-                            <select name="reply_cc_partners" id="reply_cc_compose_partner" class="form-control" multiple="multiple" placeholder="Cc">
+                            <select name="cc_partners" id="reply_cc_compose_partner" class="form-control" multiple="multiple" placeholder="Cc">
                             </select>
                         </div>
                         <div class="bcc-list">
-                            <select name="reply_bcc_partners" id="reply_bcc_compose_partner" class="form-control" multiple="multiple" placeholder="Bcc">
+                            <select name="bcc_partners" id="reply_bcc_compose_partner" class="form-control" multiple="multiple" placeholder="Bcc">
                             </select>
                         </div>
                         <div class="reply_body_content">

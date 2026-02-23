@@ -36,6 +36,17 @@ class WebsiteOdooInbox(http.Controller):
     def pager(self, url, total, page=1, step=30, scope=5, url_args=None):
         return pager(url, total, page=page, step=step, scope=scope, url_args=url_args)
 
+    def _safe_partner_ids(raw_list):
+        ids = []
+        for val in raw_list:
+            try:
+                pid = int(val)
+                if pid > 0:
+                    ids.append(pid)
+            except Exception:
+                continue
+        return list(set(ids))
+
     def get_message_counter_domain(self, model_object, domain):
         query = model_object._where_calc(domain)
         # model_object._apply_ir_rules(query, 'read')
@@ -158,7 +169,7 @@ class WebsiteOdooInbox(http.Controller):
                 msg_dict = MailThread.message_parse(message)
                 flags = imap_server.fetch(num, '(FLAGS)')[1][0].decode('utf-8')
                 is_read = 'ReadEmail' in flags
-                _logger.info(f"flag is {str(flags)} {str(is_read)}")
+                # _logger.info(f"flag is {str(flags)} {str(is_read)}")
                 msg_dict['is_read'] = 'ReadEmail' in flags
                 if not msg_dict['is_read']:
                     unread_count = unread_count + 1
@@ -210,7 +221,7 @@ class WebsiteOdooInbox(http.Controller):
 
         for folder_name in folders:
             raw = folder_name.decode(errors="ignore")
-            _logger.info("RAW IMAP LIST: %s", raw)
+            # _logger.info("RAW IMAP LIST: %s", raw)
 
             m = IMAP_LIST_RE.match(raw)
             if not m:
@@ -230,7 +241,7 @@ class WebsiteOdooInbox(http.Controller):
             # RFC rule: quote ONLY if space is present
             select_arg = f'"{real_name}"' if " " in real_name else real_name
 
-            _logger.info("IMAP selecting folder: %s", select_arg)
+            # _logger.info("IMAP selecting folder: %s", select_arg)
 
             status, _ = imap_server.select(select_arg)
             if status != "OK":
@@ -348,7 +359,7 @@ class WebsiteOdooInbox(http.Controller):
                     for att in msg_dict['attachments']:
                         context = dict(request.env.context)  # Create a copy of the current context
                         context['image_no_postprocess'] = True 
-                        _logger.info(f"attachment type is {type(att.content)}")
+                        # _logger.info(f"attachment type is {type(att.content)}")
                         if isinstance(att.content, EmailMessage):  # Probably an EmailMessage
                             content_bytes = att.content.get_payload(decode=True)
                             if content_bytes is None:
@@ -436,127 +447,163 @@ class WebsiteOdooInbox(http.Controller):
     @http.route(['/mail/<int:index>/message_post'], type='http', auth="user", website=True)
     def message_post_send(self, index=0, **post):
 
-        subject = post.get('subject')
-        body = post.get('body')
-        email_to_raw = post.get('email')
+        subject = (post.get('subject') or '').strip()
+        body = (post.get('body') or '').strip()
+        email_to_raw = (post.get('email') or '').strip()
 
         if not subject or not body:
-            return request.redirect('/mail/' + str(index) + '/inbox')
+            return request.redirect(f'/mail/{index}/inbox')
 
-        # -------------------------
+        # ------------------------------------------------------
         # Clean email format
-        # -------------------------
-        if email_to_raw and ">" in email_to_raw:
-            email_to_raw = email_to_raw.replace(">", "")
-            email_to_raw = email_to_raw.split("<")[1]
-
-        # -------------------------
-        # Ensure partner exists
-        # -------------------------
-        partner = request.env['res.partner'].sudo().search(
-            [('email', 'ilike', email_to_raw)],
-            limit=1
-        )
-
-        if not partner:
-            partner = request.env['res.partner'].sudo().create({
-                'email': email_to_raw,
-                'name': email_to_raw,
-                'lang': 'de_DE'
-            })
-
-        partner_ids = [partner.id]
-
-        # -------------------------
-        # Additional recipients
-        # -------------------------
-        extra_partners = request.httprequest.form.getlist('partners')
-        for p in extra_partners:
+        # ------------------------------------------------------
+        if "<" in email_to_raw and ">" in email_to_raw:
             try:
-                partner_ids.append(int(p))
+                email_to_raw = email_to_raw.split("<")[1].replace(">", "").strip()
             except Exception:
-                new_partner = request.env['res.partner'].sudo().create({
-                    'email': p,
-                    'name': p,
+                pass
+
+        # ------------------------------------------------------
+        # Ensure main partner exists
+        # ------------------------------------------------------
+        partner_ids = []
+
+        if email_to_raw:
+            partner = request.env['res.partner'].sudo().search(
+                [('email', 'ilike', email_to_raw)],
+                limit=1
+            )
+
+            if not partner:
+                partner = request.env['res.partner'].sudo().create({
+                    'email': email_to_raw,
+                    'name': email_to_raw,
                     'lang': 'de_DE'
                 })
-                partner_ids.append(new_partner.id)
 
-        partner_ids = list(set(partner_ids))
+            if partner.id > 0:
+                partner_ids.append(partner.id)
 
-        partners = request.env['res.partner'].sudo().browse(partner_ids)
+        # ------------------------------------------------------
+        # Extra recipients (safe)
+        # ------------------------------------------------------
+        extra_partners = request.httprequest.form.getlist('partners')
 
-        # -------------------------
-        # Attachments
-        # -------------------------
-        files = request.httprequest.files.getlist('attachments')
+        for p in extra_partners:
+            try:
+                pid = int(p)
+                if pid > 0:
+                    partner_ids.append(pid)
+            except Exception:
+                if p:
+                    new_partner = request.env['res.partner'].sudo().create({
+                        'email': p,
+                        'name': p,
+                        'lang': 'de_DE'
+                    })
+                    partner_ids.append(new_partner.id)
+
+        # Remove invalid / duplicates
+        partner_ids = list(set(pid for pid in partner_ids if pid > 0))
+        partner_ids = request.env['res.partner'].sudo().browse(partner_ids).exists().ids
+
+        # ------------------------------------------------------
+        # Attachments (safe multi-upload)
+        # ------------------------------------------------------
         attachment_ids = []
+        files = request.httprequest.files.getlist('attachments')
 
         for f in files:
-            if f.filename:
-                attachment = request.env['ir.attachment'].sudo().create({
-                    'name': f.filename,
-                    'datas': base64.encodebytes(f.read()),
-                    'res_model': 'res.partner',
-                    'res_id': partner.id,
-                })
-                attachment_ids.append(attachment.id)
+            if f and f.filename:
+                try:
+                    data = base64.b64encode(f.read())
+                    attachment = request.env['ir.attachment'].sudo().create({
+                        'name': f.filename,
+                        'datas': data,
+                        'res_model': 'res.partner',
+                        'res_id': request.env.user.partner_id.id,
+                        'mimetype': f.content_type,
+                    })
+                    attachment_ids.append(attachment.id)
+                except Exception as e:
+                    _logger.error(f"Attachment error: {e}")
 
-        # -------------------------
-        # CC / BCC
-        # -------------------------
-        cc_ids = request.httprequest.form.getlist('cc_partners')
-        bcc_ids = request.httprequest.form.getlist('bcc_partners')
+        # ------------------------------------------------------
+        # CC / BCC (safe)
+        # ------------------------------------------------------
+        def safe_partner_ids(raw_list):
+            ids = []
+            for item in raw_list:
+                try:
+                    pid = int(item)
+                    if pid > 0:
+                        ids.append(pid)
+                except:
+                    pass
+            return request.env['res.partner'].sudo().browse(ids).exists().ids
 
-        cc_partners = request.env['res.partner'].sudo().browse(map(int, cc_ids)) if cc_ids else False
-        bcc_partners = request.env['res.partner'].sudo().browse(map(int, bcc_ids)) if bcc_ids else False
+        cc_ids = safe_partner_ids(request.httprequest.form.getlist('cc_partners'))
+        bcc_ids = safe_partner_ids(request.httprequest.form.getlist('bcc_partners'))
+        _logger.warning(f"1FINAL partner_ids: {partner_ids}")
+        _logger.warning(f"FINAL cc_ids: {cc_ids}")
+        _logger.warning(f"FINAL bcc_ids: {bcc_ids}")
 
-        # -------------------------
-        # Get outgoing email server (SAFE)
-        # -------------------------
-        fetchmail_server = request.env['fetchmail.server'].sudo().search([
+
+
+        # ------------------------------------------------------
+        # Get outgoing server safely
+        # ------------------------------------------------------
+        fetchmail_servers = request.env['fetchmail.server'].sudo().search([
             ('user_id', '=', request.env.user.id),
             ('server_type', '=', 'imap')
-        ], limit=1)
+        ])
+
+        server = fetchmail_servers[index] if len(fetchmail_servers) > index else False
 
         email_from = request.env.user.email
         reply_to = request.env.user.email
 
-        if fetchmail_server:
-            email_from = '%s <%s>' % (fetchmail_server.name, fetchmail_server.user)
+        if server:
+            email_from = f"{server.name} <{server.user}>"
             reply_to = email_from
 
-        # -------------------------
-        # 1️⃣ Log message internally
-        # -------------------------
+        # ------------------------------------------------------
+        # Log internally
+        # ------------------------------------------------------
         request.env.user.partner_id.sudo().message_post(
             body=body,
             subject=subject,
             attachment_ids=attachment_ids,
         )
 
-        # -------------------------
-        # 2️⃣ Send REAL SMTP email
-        # -------------------------
+        # ------------------------------------------------------
+        # Send actual SMTP email
+        # ------------------------------------------------------
         mail_values = {
             'subject': subject,
             'body_html': body,
-            'email_to': ','.join(partners.mapped('email')),
+            'email_to': ','.join(
+                request.env['res.partner'].browse(partner_ids).mapped('email')
+            ),
             'email_from': email_from,
             'reply_to': reply_to,
             'attachment_ids': [(6, 0, attachment_ids)],
         }
 
-        if cc_partners:
-            mail_values['email_cc'] = ','.join(cc_partners.mapped('email'))
+        if cc_ids:
+            mail_values['email_cc'] = ','.join(
+                request.env['res.partner'].browse(cc_ids).mapped('email')
+            )
 
-        if bcc_partners:
-            mail_values['email_bcc'] = ','.join(bcc_partners.mapped('email'))
+        if bcc_ids:
+            mail_values['email_bcc'] = ','.join(
+                request.env['res.partner'].browse(bcc_ids).mapped('email')
+            )
 
         mail = request.env['mail.mail'].sudo().create(mail_values)
         mail.send()
 
-        return request.redirect('/mail/' + str(index) + '/inbox')
+        return request.redirect(f'/mail/{index}/inbox')
 
     @http.route(['/'], type='http', auth="user", website=True)
     def redirect_inbox(self):
@@ -564,92 +611,121 @@ class WebsiteOdooInbox(http.Controller):
 
     @http.route(['/sent_mail/<int:index>/mail'], type='http', auth="user", website=True)
     def mail_send(self, index=0, **post):
-        if post:
-            partners = request.httprequest.form.getlist('partners')
-            # if partners:
-            #     post['partners_list'] = map(int, partners)
-            cc_partners = request.httprequest.form.getlist('cc_partners')
-            # if cc_partners:
-            #     post['cc_partners_list'] = map(int, cc_partners)
-            bcc_partners = request.httprequest.form.getlist('bcc_partners')
-            # if bcc_partners:
-            #     post['bcc_partners_list'] = map(int, bcc_partners)
-            subject = post.get('subject')
-            body = post.get('body')
-            model_name = post.get('document_model') if post.get('document_model') != '0' else False
-            res_id = post.get('document_model_record') if post.get('document_model_record') != '0' else False
-            message_object = False
-            if model_name and res_id:
-                message_object = request.env[model_name].search([('id', '=', int(res_id))])
-            if not message_object:
-                message_object = request.env.user.partner_id
-            _logger.info(f"message is {str(message_object)}")
-            partner_ids = email_cc_ids = email_bcc_ids = False
-            if partners:
-                partner_id_list = []
-                for partner in partners:
-                    try:
-                        partner_id = int(partner)
-                        partner_id_list.append(partner_id)
-                    except:
-                        # Not an integer, treat as email
-                        new_partner = request.env['res.partner'].with_context(lang=False).sudo().create({'email': partner, 'name': partner, 'lang': 'de_DE'})
-                        partner_id_list.append(new_partner.id)
-                partner_ids = request.env['res.partner'].browse(partner_id_list)
-                tags = request.httprequest.form.getlist('tags')
-                tags = [int(tag) for tag in tags]
-                _logger.info(f"tags are {str(tags)}")
-                if len(tags) > 0:
-                    partner_ids = request.env['res.partner'].search([('category_id', 'in', tags)])
-                    _logger.info(f"tags are {str(partner_ids)}")
-            if cc_partners:
-                email_cc_ids = request.env['res.partner'].browse(map(int, cc_partners))
-            if bcc_partners:
-                email_bcc_ids = request.env['res.partner'].browse(map(int, bcc_partners))
-            # for partner in request.env['res.partner'].browse(map(int, partners)):
-            attachment_ids = []
-            files = request.httprequest.files.getlist('compose_attachments')
-            if files:
-                for i in files:
-                    if i.filename != '':
-                        attachments = {
-                                'name': i.filename,
-                                'res_name': i.filename,
-                                'res_model': model_name or 'res.partner',
-                                'res_id': res_id and int(res_id) or False,
-                                'datas': base64.encodebytes(i.read()),
-                            }
-                        attachment = request.env['ir.attachment'].sudo().create(attachments)
-                        attachment_ids.append(attachment.id)
-            forward_attachments = post.get('forward_attachments') if post.get('forward_attachments') else None
-            _logger.info(f'attachment ids are {str(post)}')
-            if forward_attachments:
-                split = forward_attachments.split(',')
-                for num in split:
-                    attachment_ids.append(int(num.strip()))
 
-            fetchmail_server = request.env['fetchmail.server'].search([
-                ('user_id', '=', request.env.user.id),
-                ('server_type', '=', 'imap')
-            ])
-            _logger.info(f"servers are {str(fetchmail_server)} {str(index)}")
-            server = fetchmail_server[index]
-            message = message_object.message_post(
-                body=body,
-                subject=subject,
-                email_from='%s <%s>' % (server.name, server.user),
-                reply_to='%s <%s>' % (server.name, server.user),
-                author_id=request.env.user.partner_id.id,
-                attachment_ids=attachment_ids,
-                partner_ids=partner_ids.ids if partner_ids else [],
-                email_cc_ids=email_cc_ids.ids if email_cc_ids else False,
-                email_bcc_ids=email_bcc_ids.ids if email_bcc_ids else False,
-                message_type='email',
-                subtype_id=request.env.ref('mail.mt_comment').id,
-            )
+        subject = (post.get('subject') or '').strip()
+        body = (post.get('body') or '').strip()
 
-            message.write({'msg_unread': False})
-        return request.redirect('/mail/'+str(index)+'/inbox')
+        if not subject or not body:
+            return request.redirect(f'/mail/{index}/inbox')
+
+        # --------------------------------------------------
+        # Safe partner handling
+        # --------------------------------------------------
+        raw_partners = request.httprequest.form.getlist('partners')
+        partner_ids = []
+
+        for p in raw_partners:
+            try:
+                pid = int(p)
+                if pid > 0:
+                    partner_ids.append(pid)
+            except:
+                if p:
+                    new_partner = request.env['res.partner'].sudo().create({
+                        'email': p,
+                        'name': p,
+                        'lang': 'de_DE'
+                    })
+                    partner_ids.append(new_partner.id)
+
+        # remove invalid and duplicates
+        partner_ids = list(set(pid for pid in partner_ids if pid > 0))
+        partner_ids = request.env['res.partner'].sudo().browse(partner_ids).exists().ids
+
+        # --------------------------------------------------
+        # Safe CC / BCC
+        # --------------------------------------------------
+        def safe_ids(raw_list):
+            ids = []
+            for item in raw_list:
+                try:
+                    pid = int(item)
+                    if pid > 0:
+                        ids.append(pid)
+                except:
+                    pass
+            return request.env['res.partner'].sudo().browse(ids).exists().ids
+
+        cc_ids = safe_ids(request.httprequest.form.getlist('cc_partners'))
+        bcc_ids = safe_ids(request.httprequest.form.getlist('bcc_partners'))
+
+        # --------------------------------------------------
+        # Safe attachments
+        # --------------------------------------------------
+        attachment_ids = []
+        files = request.httprequest.files.getlist('compose_attachments')
+
+        for f in files:
+            if f and f.filename:
+                attachment = request.env['ir.attachment'].sudo().create({
+                    'name': f.filename,
+                    'datas': base64.b64encode(f.read()),
+                    'res_model': 'res.partner',
+                    'res_id': request.env.user.partner_id.id,
+                    'mimetype': f.content_type,
+                })
+                attachment_ids.append(attachment.id)
+
+        # --------------------------------------------------
+        # Safe server handling
+        # --------------------------------------------------
+        fetchmail_servers = request.env['fetchmail.server'].sudo().search([
+            ('user_id', '=', request.env.user.id),
+            ('server_type', '=', 'imap')
+        ])
+
+        server = fetchmail_servers[index] if len(fetchmail_servers) > index else False
+
+        email_from = request.env.user.email
+        reply_to = request.env.user.email
+
+        if server:
+            email_from = f"{server.name} <{server.user}>"
+            reply_to = email_from
+
+        # --------------------------------------------------
+        # Send via message_post
+        # --------------------------------------------------
+        safe_partner_ids = [pid for pid in partner_ids if pid > 0]
+        safe_cc_ids = [pid for pid in cc_ids if pid > 0]
+        safe_bcc_ids = [pid for pid in bcc_ids if pid > 0]
+
+        safe_partner_ids = request.env['res.partner'].sudo().browse(safe_partner_ids).exists().ids
+        safe_cc_ids = request.env['res.partner'].sudo().browse(safe_cc_ids).exists().ids
+        safe_bcc_ids = request.env['res.partner'].sudo().browse(safe_bcc_ids).exists().ids
+
+        _logger.warning(f"2FINAL partner_ids: {safe_partner_ids}")
+        _logger.warning(f"FINAL cc_ids: {safe_cc_ids}")
+        _logger.warning(f"FINAL bcc_ids: {safe_bcc_ids}")
+
+        message = request.env.user.partner_id.message_post(
+            body=body,
+            subject=subject,
+            email_from=email_from,
+            reply_to=reply_to,
+            author_id=request.env.user.partner_id.id,
+            attachment_ids=attachment_ids,
+            partner_ids=safe_partner_ids,
+            email_cc_ids=safe_cc_ids,
+            email_bcc_ids=safe_bcc_ids,
+            message_type='email',
+            subtype_id=request.env.ref('mail.mt_comment').id,
+        )
+
+        message.write({'msg_unread': False})
+
+        return request.redirect(f'/mail/{index}/inbox')
+
 
     @http.route(['/mail/send/<model("mail.message"):message>',
                  ], type='http', auth="user", website=True)
@@ -1040,11 +1116,11 @@ class WebsiteOdooInbox(http.Controller):
         old_encoded = imapclient.imap_utf7.encode(old_raw)
         new_encoded = imapclient.imap_utf7.encode(full_new_name)
 
-        _logger.info(f"Renaming IMAP folder: {old_raw} → {full_new_name}")
+        # _logger.info(f"Renaming IMAP folder: {old_raw} → {full_new_name}")
 
         try:
             imap_server.rename(old_encoded, new_encoded)
-            _logger.info(f"Rename OK: {old_raw} → {full_new_name}")
+            # _logger.info(f"Rename OK: {old_raw} → {full_new_name}")
         except Exception as e:
             _logger.error(f"IMAP rename failed: {e}")
             return request.redirect(request.httprequest.referrer)
@@ -1153,11 +1229,11 @@ class WebsiteOdooInbox(http.Controller):
         partner_values = {}
         partner_list = []
         domain = [('email', '!=', False)]
-        _logger.info(f"res_partner_query is {q}")
+        # _logger.info(f"res_partner_query is {q}")
         if q:
             domain += ['|', ('name', 'ilike', q), ('email', 'ilike', q)]
             partner_ids = request.env['res.partner'].search(domain)
-            _logger.info(f"res_partner_query is {str(partner_ids)}")
+            # _logger.info(f"res_partner_query is {str(partner_ids)}")
             for partner in partner_ids:
                 text_name = ''
                 if partner.name:
@@ -1214,5 +1290,5 @@ class WebsiteOdooInbox(http.Controller):
             # 'attachment_ids': [(6, 0, [att.id for att in record.attachment_ids])],
         }
         template = request.env['mail.template'].create(values)
-        _logger.info("Mail Template is created: %s" % [template])
+        # _logger.info("Mail Template is created: %s" % [template])
         return True
