@@ -22,6 +22,8 @@ import re
 import email.policy
 import imaplib
 
+from odoo.addons.odoo_inbox.utils.imap_helper import IMAPHelper
+
 _logger = logging.getLogger(__name__)
 
 def extract_folder_name(raw_folder):
@@ -63,10 +65,10 @@ class WebsiteOdooInbox(http.Controller):
             search=None, existing_tag=None, existing_folder=None,
             partner=None, index=0, start=None, end=None, size_filter=None):
 
-        import base64
         import email
         import email.policy
         from datetime import datetime
+        from imapclient import IMAPClient
 
         if domain is None:
             domain = []
@@ -81,10 +83,6 @@ class WebsiteOdooInbox(http.Controller):
         messages = []
         unread_count = 0
         counter_domain = []
-
-        # ------------------------------------------------
-        # Partner filtering
-        # ------------------------------------------------
 
         partner_id = partner if partner else user.partner_id
 
@@ -101,7 +99,7 @@ class WebsiteOdooInbox(http.Controller):
         ]
 
         # ------------------------------------------------
-        # IMAP connection
+        # IMAP connection (IMAPClient)
         # ------------------------------------------------
 
         fetchmail_server = request.env['fetchmail.server'].search([
@@ -118,10 +116,24 @@ class WebsiteOdooInbox(http.Controller):
         server = fetchmail_server[index]
 
         try:
-            imap_server = server.connect()
+            imap_server = IMAPClient(
+                server.server,
+                port=server.port or 993,
+                ssl=server.is_ssl
+            )
+
+            imap_server.login(server.user, server.password)
+
         except Exception as e:
             _logger.error("IMAP connection failed: %s", e)
             return request.make_response("<h3>IMAP connection failed</h3>")
+
+        _logger.warning(
+            "IMAP DEBUG → host=%s port=%s user=%s",
+            server.server,
+            server.port,
+            server.user
+        )
 
         # ------------------------------------------------
         # Select mailbox
@@ -129,38 +141,36 @@ class WebsiteOdooInbox(http.Controller):
 
         mailbox = "INBOX" if label.lower() == "inbox" else label
 
-        status, _ = imap_server.select(f'"{mailbox}"')
-
-        if status != "OK":
+        try:
+            imap_server.select_folder(mailbox)
+        except Exception as e:
+            _logger.error("Cannot open mailbox: %s", e)
             return request.make_response("<h3>Cannot open mailbox</h3>")
 
         # ------------------------------------------------
-        # Search query
+        # Search messages
         # ------------------------------------------------
 
-        query_parts = []
+        search_criteria = ['ALL']
 
         if search:
-            query_parts.append(
-                f'(OR (OR SUBJECT "{search}" BODY "{search}") HEADER From "{search}")'
-            )
+            search_criteria = ['TEXT', search]
 
         if start:
-            d = datetime.strptime(start, "%Y-%m-%d").strftime("%d-%b-%Y")
-            query_parts.append(f'SINCE "{d}"')
+            d = datetime.strptime(start, "%Y-%m-%d")
+            search_criteria += ['SINCE', d]
 
         if end:
-            d = datetime.strptime(end, "%Y-%m-%d").strftime("%d-%b-%Y")
-            query_parts.append(f'BEFORE "{d}"')
+            d = datetime.strptime(end, "%Y-%m-%d")
+            search_criteria += ['BEFORE', d]
 
-        search_query = f'({" ".join(query_parts)})' if query_parts else "ALL"
-
-        result, data = imap_server.search(None, search_query)
-
-        if result != "OK":
+        try:
+            message_ids = imap_server.sort(['REVERSE DATE'], search_criteria)
+        except Exception as e:
+            _logger.error("Search failed: %s", e)
             return request.make_response("<h3>Search failed</h3>")
 
-        message_ids = list(reversed(data[0].split()))
+        # message_ids.reverse()
 
         total_count = len(message_ids)
 
@@ -170,24 +180,31 @@ class WebsiteOdooInbox(http.Controller):
         page_ids = message_ids[start_i:end_i]
 
         # ------------------------------------------------
-        # Fetch messages
+        # Fetch messages (batch fetch = faster)
         # ------------------------------------------------
 
-        for num in page_ids:
+        try:
+            response = imap_server.fetch(page_ids, ['RFC822', 'FLAGS'])
+        except Exception as e:
+            _logger.error("Fetch failed: %s", e)
+            response = {}
 
-            result, msg_data = imap_server.fetch(num, '(FLAGS RFC822)')
+        for uid in page_ids:
 
-            raw_msg = msg_data[0][1]
+            data = response.get(uid)
+            if not data:
+                continue
+
+            raw_msg = data[b'RFC822']
 
             try:
-
                 msg = email.message_from_bytes(raw_msg, policy=email.policy.SMTP)
 
                 msg_dict = MailThread.message_parse(msg)
 
-                flags = msg_data[0][0].decode()
+                flags = data[b'FLAGS']
 
-                msg_dict['is_read'] = '\\Seen' in flags
+                msg_dict['is_read'] = b'\\Seen' in flags
 
                 if not msg_dict['is_read']:
                     unread_count += 1
@@ -196,35 +213,19 @@ class WebsiteOdooInbox(http.Controller):
 
             except Exception as e:
                 _logger.warning("Email parse failed: %s", e)
-
+        # messages.sort(key=lambda x: x.get('date') or datetime.min, reverse=True)
         # ------------------------------------------------
-        # Folder loader (fast + clean)
+        # Folder loading (IMAPClient)
         # ------------------------------------------------
-
-        status, folders = imap_server.list()
 
         folder_tree = {}
         counter_fd_msgs = {}
 
-        IMAP_LIST_RE = re.compile(
-            r'^\((?P<flags>.*?)\)\s+"(?P<delim>.*?)"\s+(?P<name>.+)$'
-        )
+        folders = imap_server.list_folders()
 
-        def decode_imap_utf7(s):
+        def insert_folder(path):
 
-            def repl(m):
-                b64 = m.group(1)
-                if b64 == "":
-                    return "&"
-                b64 = b64.replace(",", "/")
-                pad = "=" * (-len(b64) % 4)
-                return base64.b64decode(b64 + pad).decode("utf-16-be")
-
-            return re.sub(r"&([A-Za-z0-9+,]*)-", repl, s)
-
-        def insert_folder(path, delim):
-
-            parts = path.split(delim)
+            parts = path.split('/')
             node = folder_tree
 
             for p in parts:
@@ -232,22 +233,13 @@ class WebsiteOdooInbox(http.Controller):
 
         seen_short = set()
 
-        for folder in folders:
+        for flags, delim, name in folders:
 
-            raw = folder.decode(errors="ignore")
+            if isinstance(name, bytes):
+                name = name.decode("utf-8", errors="ignore")
 
-            m = IMAP_LIST_RE.match(raw)
-
-            if not m:
-                continue
-
-            delim = m.group("delim")
-            name = m.group("name").strip()
-
-            if name.startswith('"') and name.endswith('"'):
-                name = name[1:-1]
-
-            name = decode_imap_utf7(name)
+            if isinstance(delim, bytes):
+                delim = delim.decode("utf-8", errors="ignore")
 
             short = name.split(delim)[-1].lower()
 
@@ -256,7 +248,7 @@ class WebsiteOdooInbox(http.Controller):
 
             seen_short.add(short)
 
-            insert_folder(name, delim)
+            insert_folder(name)
 
             counter_fd_msgs[name] = "0"
 
@@ -332,7 +324,6 @@ class WebsiteOdooInbox(http.Controller):
             'color': color,
             'search': search,
 
-            # REQUIRED BY SIDEBAR TEMPLATE
             'current_partner': partner if partner else request.env.user.partner_id,
             'user_child_partner_ids': request.env.user.child_partner_ids,
 
@@ -358,10 +349,10 @@ class WebsiteOdooInbox(http.Controller):
     @http.route(['/mail/<int:index>/message_read'], type='json', auth="user", website=True)
     def odoo_message_read(self, index, **kw):
 
-        import re
         import base64
         import email
         import email.policy
+        from imapclient import IMAPClient
 
         message_id = kw.get('message')
 
@@ -372,58 +363,35 @@ class WebsiteOdooInbox(http.Controller):
 
         server = fetchmail_server[index]
 
-        imap_server = server.connect()
+        try:
+            imap_server = IMAPClient(
+                server.server,
+                port=server.port or 993,
+                ssl=server.is_ssl
+            )
 
-        status, folders = imap_server.list()
+            imap_server.login(server.user, server.password)
 
-        if status != "OK":
+        except Exception as e:
+            _logger.error("IMAP connection failed: %s", e)
             return {'error': True}
 
         found = False
 
         MailThread = request.env['mail.thread']
 
-        IMAP_LIST_RE = re.compile(
-            r'^\((?P<flags>.*?)\)\s+"(?P<delim>.*?)"\s+(?P<name>.+)$'
-        )
-
-        # UTF7 decoder
-        def decode_imap_utf7(s):
-
-            import base64
-            import re
-
-            def repl(match):
-                b64 = match.group(1)
-
-                if b64 == "":
-                    return "&"
-
-                b64 = b64.replace(",", "/")
-                pad = "=" * (-len(b64) % 4)
-
-                return base64.b64decode(b64 + pad).decode("utf-16-be")
-
-            return re.sub(r"&([A-Za-z0-9+,]*)-", repl, s)
+        folders = imap_server.list_folders()
 
         visited = set()
 
-        for folder in folders:
+        for flags, delim, name in folders:
 
-            raw = folder.decode(errors="ignore")
+            # ensure str (some servers return bytes)
+            if isinstance(name, bytes):
+                name = name.decode("utf-8", errors="ignore")
 
-            m = IMAP_LIST_RE.match(raw)
-
-            if not m:
-                continue
-
-            delim = m.group("delim")
-            name = m.group("name").strip()
-
-            if name.startswith('"') and name.endswith('"'):
-                name = name[1:-1]
-
-            name = decode_imap_utf7(name)
+            if isinstance(delim, bytes):
+                delim = delim.decode("utf-8", errors="ignore")
 
             short = name.split(delim)[-1].lower()
 
@@ -435,28 +403,28 @@ class WebsiteOdooInbox(http.Controller):
             _logger.info(f"Checking folder: {name}")
 
             try:
-                status, _ = imap_server.select(f'"{name}"')
+                imap_server.select_folder(name)
             except Exception as e:
                 _logger.warning(f"Cannot select folder {name}: {e}")
                 continue
 
-            if status != "OK":
-                continue
+            try:
+                msg_ids = imap_server.search(['HEADER', 'Message-ID', message_id])
+            except Exception:
+                msg_ids = []
 
-            status, data = imap_server.search(None, f'(HEADER Message-ID "{message_id}")')
-
-            if not data or not data[0]:
+            if not msg_ids:
                 continue
 
             found = True
 
-            for num in data[0].split():
+            response = imap_server.fetch(msg_ids, ['RFC822', 'FLAGS'])
 
-                result, msg_data = imap_server.fetch(num, '(RFC822)')
+            for uid, data in response.items():
 
-                raw_msg = msg_data[0][1]
+                raw_msg = data[b'RFC822']
 
-                imap_server.store(num, '+FLAGS', '\\Seen')
+                imap_server.add_flags(uid, ['\\Seen'])
 
                 message = email.message_from_bytes(raw_msg, policy=email.policy.SMTP)
 
@@ -473,8 +441,10 @@ class WebsiteOdooInbox(http.Controller):
 
                         if hasattr(att.content, "get_payload"):
                             content_bytes = att.content.get_payload(decode=True)
+
                         elif isinstance(att.content, str):
                             content_bytes = att.content.encode()
+
                         else:
                             content_bytes = att.content
 
@@ -506,6 +476,8 @@ class WebsiteOdooInbox(http.Controller):
                     }
                 )
 
+                imap_server.logout()
+
                 return {
                     'msg_unread': True,
                     'inbox_mssg_count': 0,
@@ -516,6 +488,8 @@ class WebsiteOdooInbox(http.Controller):
                     'message_body': message_body,
                     'index': index
                 }
+
+        imap_server.logout()
 
         if not found:
 
@@ -727,7 +701,35 @@ class WebsiteOdooInbox(http.Controller):
         mail = request.env['mail.mail'].sudo().create(mail_values)
         _logger.warning(f"Mail Value::{mail_values}")
         mail.send()
+        try:
 
+            imap_server = server.connect()
+
+            from email.message import EmailMessage
+
+            msg = EmailMessage()
+            msg['Subject'] = subject
+            msg['From'] = email_from
+            msg['To'] = mail_values['email_to']
+
+            if mail_values.get('email_cc'):
+                msg['Cc'] = mail_values['email_cc']
+
+            msg.set_content(body)
+
+            raw_message = msg.as_bytes()
+
+            sent_folders = ["Sent", "INBOX/Sent", "Sent Items"]
+
+            for folder in sent_folders:
+                try:
+                    imap_server.append(f'"{folder}"', '\\Seen', None, raw_message)
+                    break
+                except:
+                    continue
+
+        except Exception as e:
+            _logger.warning(f"Could not save message to Sent folder: {e}")
         return request.redirect(f'/mail/{index}/inbox')
 
     @http.route(['/'], type='http', auth="user", website=True)
@@ -1010,43 +1012,107 @@ class WebsiteOdooInbox(http.Controller):
         message.sudo().unlink()
         return request.redirect('/mail/trash')
 
-    @http.route('/mail/<int:index>/all_mssg_trash', type="json", auth="user", website=True)
     def odoo_all_mssg_trash(self, index=0, messg_ids=[], **post):
+
+        from imapclient import IMAPClient
+
         fetchmail_server = request.env['fetchmail.server'].search([
-                ('user_id', '=', request.env.user.id),
-                ('server_type', '=', 'imap')
-            ])
-        server = fetchmail_server[index]
-        imap_server = server.connect()
-        status, folders = imap_server.list()
-        trash_folder = None
-        
-        # Find the Trash folder
-        for folder in folders:
-            folder_name = folder.decode()
-            if 'Trash' in folder_name:
-                trash_folder = folder.decode().split(' "." ')[1].replace('"', '')
-                break
-                
-        if not trash_folder:
+            ('user_id', '=', request.env.user.id),
+            ('server_type', '=', 'imap')
+        ])
+
+        if not fetchmail_server:
             return False
-            
-        for folder in folders:
-            raw_name = folder.decode().split(' "." ')[1].replace('"', '')
-            encoded_name = imapclient.imap_utf7.encode(raw_name)
-            status, _ = imap_server.select(encoded_name)
-            if status != "OK":
-                _logger.error(f"Cannot select folder: {raw_name}")
+
+        server = fetchmail_server[index]
+
+        try:
+            imap_server = IMAPClient(
+                server.server,
+                port=server.port or 993,
+                ssl=server.is_ssl
+            )
+
+            imap_server.login(server.user, server.password)
+
+        except Exception as e:
+            _logger.error(f"IMAP connection failed: {e}")
+            return False
+
+
+        folders = imap_server.list_folders()
+
+        trash_folder = None
+
+        # ------------------------------------------------
+        # Detect trash folder (supports German / Outlook / Gmail)
+        # ------------------------------------------------
+
+        for flags, delim, name in folders:
+
+            if isinstance(name, bytes):
+                name = name.decode()
+
+            lower = name.lower()
+
+            if (
+                'trash' in lower
+                or 'gelöscht' in lower
+                or 'geloscht' in lower
+                or 'deleted' in lower
+            ):
+                trash_folder = name
+                break
+
+        if not trash_folder:
+            _logger.error("Trash folder not found")
+            imap_server.logout()
+            return False
+
+
+        # ------------------------------------------------
+        # Scan folders for messages
+        # ------------------------------------------------
+
+        for flags, delim, name in folders:
+
+            if isinstance(name, bytes):
+                name = name.decode()
+
+            try:
+                imap_server.select_folder(name)
+
+            except Exception as e:
+                _logger.warning(f"Cannot open folder {name}: {e}")
                 continue
+
             for mssg in messg_ids:
-                result, data = imap_server.search(None, f'HEADER Message-ID "{mssg}"')
-                if data[0]:
-                    for num in data[0].split():
-                        # Copy to Trash folder first
-                        imap_server.copy(num, trash_folder)
-                        # Then delete from current folder
-                        res = imap_server.store(num, '+FLAGS', '\\Deleted')
-                        imap_server.expunge()
+
+                try:
+                    msg_ids = imap_server.search(['HEADER', 'Message-ID', mssg])
+                except Exception:
+                    msg_ids = []
+
+                if not msg_ids:
+                    continue
+
+                try:
+
+                    # Copy message to trash
+                    imap_server.copy(msg_ids, trash_folder)
+
+                    # Mark deleted
+                    imap_server.delete_messages(msg_ids)
+
+                    # Permanently remove
+                    imap_server.expunge()
+
+                except Exception as e:
+                    _logger.error(f"Trash move failed: {e}")
+
+
+        imap_server.logout()
+
         return True
 
     @http.route('/mail/all_mssg_done', type="json", auth="user", website=True)

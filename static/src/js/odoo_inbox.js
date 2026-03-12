@@ -192,9 +192,9 @@ odoo.define('odoo_inbox.odoo_inbox', function(require) {
         _onOeApplicationsHovered: function (ev) {
             var self = this;
             var menuInfo = [];
-            console.log("SSession_info:", odoo.session_info);
-            console.log("User context:", odoo.session_info.user_context);
-            console.log("User lang:", odoo.session_info.user_context.lang);
+            // console.log("SSession_info:", odoo.session_info);
+            // console.log("User context:", odoo.session_info.user_context);
+            // console.log("User lang:", odoo.session_info.user_context.lang);
 
             this._rpc({
                 model: 'ir.ui.menu',
@@ -207,11 +207,11 @@ odoo.define('odoo_inbox.odoo_inbox', function(require) {
                 },
             }).then(function (result) {
 
-                console.log("RPC result:", result);
-                console.log("Returned menu names:");
+                // console.log("RPC result:", result);
+                // console.log("Returned menu names:");
 
                 result.children.forEach((e, i) => {
-                    console.log("Menu:", e.name);
+                    // console.log("Menu:", e.name);
 
                     if (e.web_icon_data) {
                         var decode_icon = atob(e.web_icon_data);
