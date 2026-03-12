@@ -254,9 +254,6 @@ class WebsiteOdooInbox(http.Controller):
             })
             counter_fd_msgs[real_name] = "0"
 
-
-
-
         inbox_domain = counter_domain + [('msg_unread', '=', False), ('message_label', 'in', ['inbox', 'starred']), ('folder_id', '=', False)]
         starred_domain = counter_domain + [('message_label', '=', 'starred')]
         starred_mssg_count = len(self.get_message_counter_domain(MailMessage, starred_domain))
@@ -332,14 +329,37 @@ class WebsiteOdooInbox(http.Controller):
         imap_server = server.connect()
         status, folders = imap_server.list()
         found = False
+        
+        # Log all folder names fetched from IMAP
+        _logger.info("IMAP Folders List:")
         for folder in folders:
-            # real_name = folder.decode().split(' "." ')[1]
             folder_raw = folder.decode()
-            folder_utf7 = folder_raw.split(' "." ')[1].replace('"', '')
 
-            real_name = imapclient.imap_utf7.encode(folder_utf7)
+            # Log each folder name
+            _logger.info(f"Found folder: {folder_raw}")
 
-            status, _ = imap_server.select(real_name)
+            # Check if the folder name contains the expected " ." delimiter
+            if ' "." ' in folder_raw:
+                # Safely split the folder name and decode it
+                folder_utf7 = folder_raw.split(' "." ')[1].replace('"', '')
+            else:
+                # No need to split if the folder name doesn't contain " ."
+                folder_utf7 = folder_raw
+
+            # Encode the folder name to handle IMAP's UTF-7 (required for special characters)
+            try:
+                real_name = imapclient.imap_utf7.encode(folder_utf7)
+            except Exception as e:
+                _logger.error(f"Error encoding folder name {folder_utf7}: {e}")
+                continue
+
+            # Try selecting the folder
+            try:
+                status, _ = imap_server.select(real_name)
+            except imaplib.IMAP4.error as e:
+                _logger.error(f"Failed to select folder {real_name}: {e}")
+                continue
+
             if status != "OK":
                 _logger.error(f"Cannot select folder: {folder_utf7}")
                 continue
@@ -359,15 +379,14 @@ class WebsiteOdooInbox(http.Controller):
                     for att in msg_dict['attachments']:
                         context = dict(request.env.context)  # Create a copy of the current context
                         context['image_no_postprocess'] = True 
-                        # _logger.info(f"attachment type is {type(att.content)}")
-                        if isinstance(att.content, EmailMessage):  # Probably an EmailMessage
+                        if isinstance(att.content, EmailMessage):  # EmailMessage attachment
                             content_bytes = att.content.get_payload(decode=True)
                             if content_bytes is None:
                                 continue
                             encoded_data = base64.b64encode(content_bytes)
-                        elif isinstance(att.content, str):
+                        elif isinstance(att.content, str):  # String attachment
                             encoded_data = base64.b64encode(att.content.encode('utf-8'))
-                        else:
+                        else:  # Generic content
                             encoded_data = base64.b64encode(att.content)
                         try:
                             attachment = request.env['ir.attachment'].with_context(context).create({
@@ -379,7 +398,8 @@ class WebsiteOdooInbox(http.Controller):
                             })
                             attachments.append(attachment)
                         except Exception as e:
-                            pass
+                            _logger.error(f"Error while saving attachment: {e}")
+                    
                     msg_dict['attachments'] = attachments
                     mail_time = fields.Datetime.from_string(msg_dict['date'])
                     message_body = request.env['ir.ui.view']._render_template("odoo_inbox.inbox_message_detail", {
@@ -388,21 +408,25 @@ class WebsiteOdooInbox(http.Controller):
                         'mail_time': mail_time
                     })
 
-                    return {'msg_unread': True,
-                            'inbox_mssg_count': 0,
-                            'starred_mssg_count': 0,
-                            'snoozed_mssg_count': 0,
-                            'folder_mssg_count': 0,
-                            'counter_fd_msgs': {},
-                            'message_body': message_body,
-                            'index': index
-                            }
+                    return {
+                        'msg_unread': True,
+                        'inbox_mssg_count': 0,
+                        'starred_mssg_count': 0,
+                        'snoozed_mssg_count': 0,
+                        'folder_mssg_count': 0,
+                        'counter_fd_msgs': {},
+                        'message_body': message_body,
+                        'index': index
+                    }
+        
         if not found:
             return {
                 'error': True,
                 'message_body': "<div style='padding:20px;color:red;'>Message not found. It may have been moved or deleted.</div>",
                 'index': index
             }
+
+            
     @http.route(['/mail/all_mssg_unread'], type='json', auth="user", website=True)
     def odoo_all_message_unread(self, messg_ids, **kw):
         for mssg in messg_ids:
@@ -591,6 +615,7 @@ class WebsiteOdooInbox(http.Controller):
         }
 
         if cc_ids:
+            _logger.warning(f"CC id::{cc_ids}")
             mail_values['email_cc'] = ','.join(
                 request.env['res.partner'].browse(cc_ids).mapped('email')
             )
@@ -601,6 +626,7 @@ class WebsiteOdooInbox(http.Controller):
             )
 
         mail = request.env['mail.mail'].sudo().create(mail_values)
+        _logger.warning(f"Mail Value::{mail_values}")
         mail.send()
 
         return request.redirect(f'/mail/{index}/inbox')
