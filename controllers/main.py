@@ -139,7 +139,14 @@ class WebsiteOdooInbox(http.Controller):
         # Select mailbox
         # ------------------------------------------------
 
-        mailbox = "INBOX" if label.lower() == "inbox" else label
+        if label.lower() == "inbox":
+            mailbox = "INBOX"
+        elif label.lower() == "sent":
+            mailbox = "Sent"
+        elif label.lower() == "trash":
+            mailbox = "Trash"
+        else:
+            mailbox = label
 
         try:
             imap_server.select_folder(mailbox)
@@ -608,7 +615,7 @@ class WebsiteOdooInbox(http.Controller):
         # Attachments (safe multi-upload)
         # ------------------------------------------------------
         attachment_ids = []
-        files = request.httprequest.files.getlist('attachments')
+        files = request.httprequest.files.getlist('compose_attachments[]')
 
         for f in files:
             if f and f.filename:
@@ -706,8 +713,12 @@ class WebsiteOdooInbox(http.Controller):
             imap_server = server.connect()
 
             from email.message import EmailMessage
+            from email.utils import make_msgid, formatdate
+            from datetime import datetime, timezone
 
             msg = EmailMessage()
+            msg['Message-ID'] = make_msgid()
+            msg['Date'] = formatdate(localtime=True)
             msg['Subject'] = subject
             msg['From'] = email_from
             msg['To'] = mail_values['email_to']
@@ -715,7 +726,8 @@ class WebsiteOdooInbox(http.Controller):
             if mail_values.get('email_cc'):
                 msg['Cc'] = mail_values['email_cc']
 
-            msg.set_content(body)
+            msg.set_content("This email requires HTML support")
+            msg.add_alternative(body, subtype="html")
 
             raw_message = msg.as_bytes()
 
@@ -723,7 +735,7 @@ class WebsiteOdooInbox(http.Controller):
 
             for folder in sent_folders:
                 try:
-                    imap_server.append(f'"{folder}"', '\\Seen', None, raw_message)
+                    imap_server.append(folder, ['\\Seen'], datetime.now(timezone.utc), raw_message)
                     break
                 except:
                     continue
@@ -746,7 +758,7 @@ class WebsiteOdooInbox(http.Controller):
             return request.redirect(f'/mail/{index}/inbox')
 
         # --------------------------------------------------
-        # Safe partner handling
+        # Partner handling
         # --------------------------------------------------
         raw_partners = request.httprequest.form.getlist('partners')
         partner_ids = []
@@ -765,12 +777,11 @@ class WebsiteOdooInbox(http.Controller):
                     })
                     partner_ids.append(new_partner.id)
 
-        # remove invalid and duplicates
         partner_ids = list(set(pid for pid in partner_ids if pid > 0))
         partner_ids = request.env['res.partner'].sudo().browse(partner_ids).exists().ids
 
         # --------------------------------------------------
-        # Safe CC / BCC
+        # CC / BCC
         # --------------------------------------------------
         def safe_ids(raw_list):
             ids = []
@@ -787,10 +798,10 @@ class WebsiteOdooInbox(http.Controller):
         bcc_ids = safe_ids(request.httprequest.form.getlist('bcc_partners'))
 
         # --------------------------------------------------
-        # Safe attachments
+        # Attachments
         # --------------------------------------------------
         attachment_ids = []
-        files = request.httprequest.files.getlist('compose_attachments')
+        files = request.httprequest.files.getlist('compose_attachments[]')
 
         for f in files:
             if f and f.filename:
@@ -804,7 +815,7 @@ class WebsiteOdooInbox(http.Controller):
                 attachment_ids.append(attachment.id)
 
         # --------------------------------------------------
-        # Safe server handling
+        # Server config
         # --------------------------------------------------
         fetchmail_servers = request.env['fetchmail.server'].sudo().search([
             ('user_id', '=', request.env.user.id),
@@ -821,20 +832,8 @@ class WebsiteOdooInbox(http.Controller):
             reply_to = email_from
 
         # --------------------------------------------------
-        # Send via message_post
+        # Send email via Odoo
         # --------------------------------------------------
-        safe_partner_ids = [pid for pid in partner_ids if pid > 0]
-        safe_cc_ids = [pid for pid in cc_ids if pid > 0]
-        safe_bcc_ids = [pid for pid in bcc_ids if pid > 0]
-
-        safe_partner_ids = request.env['res.partner'].sudo().browse(safe_partner_ids).exists().ids
-        safe_cc_ids = request.env['res.partner'].sudo().browse(safe_cc_ids).exists().ids
-        safe_bcc_ids = request.env['res.partner'].sudo().browse(safe_bcc_ids).exists().ids
-
-        _logger.warning(f"2FINAL partner_ids: {safe_partner_ids}")
-        _logger.warning(f"FINAL cc_ids: {safe_cc_ids}")
-        _logger.warning(f"FINAL bcc_ids: {safe_bcc_ids}")
-
         message = request.env.user.partner_id.message_post(
             body=body,
             subject=subject,
@@ -842,17 +841,79 @@ class WebsiteOdooInbox(http.Controller):
             reply_to=reply_to,
             author_id=request.env.user.partner_id.id,
             attachment_ids=attachment_ids,
-            partner_ids=safe_partner_ids,
-            email_cc_ids=safe_cc_ids,
-            email_bcc_ids=safe_bcc_ids,
+            partner_ids=partner_ids,
             message_type='email',
             subtype_id=request.env.ref('mail.mt_comment').id,
         )
 
         message.write({'msg_unread': False})
 
-        return request.redirect(f'/mail/{index}/inbox')
+        # --------------------------------------------------
+        # Save email to IMAP Sent folder
+        # --------------------------------------------------
+        try:
+            if server:
 
+                imap_server = server.connect()
+
+                from email.message import EmailMessage
+                from email.utils import make_msgid, formatdate
+                from datetime import datetime, timezone
+
+                msg = EmailMessage()
+
+                msg['Message-ID'] = make_msgid()
+                msg['Date'] = formatdate(localtime=True)
+                msg['Subject'] = subject
+                msg['From'] = email_from
+
+                # TO
+                to_emails = request.env['res.partner'].browse(partner_ids).mapped('email')
+                msg['To'] = ", ".join(to_emails)
+
+                # CC
+                if cc_ids:
+                    cc_emails = request.env['res.partner'].browse(cc_ids).mapped('email')
+                    msg['Cc'] = ", ".join(cc_emails)
+
+                # Proper MIME body
+                msg.set_content("Plain text fallback")
+                msg.add_alternative(body, subtype="html")
+
+                # Attachments
+                for attachment_id in attachment_ids:
+                    attachment = request.env['ir.attachment'].sudo().browse(attachment_id)
+
+                    msg.add_attachment(
+                        base64.b64decode(attachment.datas),
+                        maintype='application',
+                        subtype='octet-stream',
+                        filename=attachment.name
+                    )
+
+                raw_message = msg.as_bytes()
+
+                sent_folders = [
+                    "Sent",
+                    "INBOX/Sent",
+                    "Sent Items",
+                    "[Gmail]/Sent Mail"
+                ]
+
+                for folder in sent_folders:
+                    try:
+                        imap_server.append(folder, ['\\Seen'], datetime.now(timezone.utc), raw_message)
+                        _logger.warning(f"Saved email to IMAP folder: {folder}")
+                        break
+                    except Exception as e:
+                        _logger.warning(f"Failed to save email to {folder}: {e}")
+
+                imap_server.logout()
+
+        except Exception as e:
+            _logger.warning(f"Could not save email to Sent folder: {e}")
+
+        return request.redirect(f'/mail/{index}/inbox')
 
     @http.route(['/mail/send/<model("mail.message"):message>',
                  ], type='http', auth="user", website=True)

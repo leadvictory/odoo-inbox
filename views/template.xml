@@ -884,7 +884,7 @@
                         <div class="menu footer min-hide">
                             <button class="btn" type="submit" title="Send">Send</button>
                             <span class="compose_attach">
-                                <input type="file" name="compose_attachments" id="file-2" class="inputfile inputfile-2 compose_attach_file" data-multiple-caption="{count} files selected" multiple=""/>
+                                <input type="file" name="compose_attachments[]" id="file-2" class="inputfile inputfile-2 compose_attach_file" data-multiple-caption="{count} files selected" multiple=""/>
                                 <label for="file-2"><i class="fa fa-paperclip"></i></label>
                                 <div class="clearfix"/>
                             </span>

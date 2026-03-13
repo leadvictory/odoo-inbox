@@ -1,46 +1,74 @@
 window.onload = function() {
 
-    //Check File API support
+    let storedFiles = [];
+
     if (window.File && window.FileList && window.FileReader) {
-        var filesInput = document.getElementsByClassName("image_src");
 
-        for (j = 0; j < filesInput.length; j++) {
+        var filesInput = document.getElementsByClassName("compose_attach_file");
+
+        for (let j = 0; j < filesInput.length; j++) {
+
             filesInput[j].addEventListener("change", function(event) {
-                var files = event.target.files; //FileList object
-                //var output = document.getElementById("result");
-                //var parentele = event.target.parentNode;
-                var parentele = event.target.parentNode.nextElementSibling;
 
-                $(files).each(function(file) {
-                    var self = this;
-                    var reader = new FileReader();
-                    reader.readAsDataURL(this);
+                const input = event.target;
+                const files = Array.from(input.files);
+                const parentele = input.parentNode.nextElementSibling;
+
+                files.forEach(function(file) {
+
+                    storedFiles.push(file);
+
+                    const reader = new FileReader();
+
                     reader.onload = function(e) {
-                        var picFile = e.target;
-                        var div = document.createElement("div");
-                        if (self.type.match('image')) {
-                            div.innerHTML = "<span href='#' class='fa fa-times-circle'></span> <img class='thumbnail' src='" + picFile.result + "'" +
-                                "title='" + self.name + "'/>";
-                        } else if (self.type === 'application/vnd.ms-excel') {
-                            div.innerHTML = "<span href='#' class='fa fa-times-circle'></span> <img class='thumbnail' src='/odoo_inbox/static/src/img/excel.png'" +
-                                "title='" + self.name + "'/>";
-                        } else if (self.type === 'application/pdf') {
-                            div.innerHTML = "<span href='#' class='fa fa-times-circle'></span> <img class='thumbnail' src='/odoo_inbox/static/src/img/pdf.png'" +
-                                "title='" + self.name + "'/>";
-                        } else {
-                            div.innerHTML = "<span href='#' class='fa fa-times-circle'></span> <img class='thumbnail' src='/odoo_inbox/static/src/img/zip.png'" +
-                                "title='" + self.name + "'/>";
+
+                        if ($("#compose_attach_result").length !== 0) {
+                            $("#compose_attach_result").css('padding-top', '5px');
                         }
+
+                        const div = document.createElement("div");
+
+                        let icon = "/odoo_inbox/static/src/img/zip.png";
+
+                        if (file.type.match('image')) {
+                            icon = e.target.result;
+                        } else if (file.type === 'application/vnd.ms-excel') {
+                            icon = "/odoo_inbox/static/src/img/excel.png";
+                        } else if (file.type === 'application/pdf') {
+                            icon = "/odoo_inbox/static/src/img/pdf.png";
+                        }
+
+                        div.innerHTML =
+                            "<span class='fa fa-times-circle'></span>" +
+                            "<img class='thumbnail' src='" + icon + "' title='" + file.name + "'/>";
+
                         parentele.appendChild(div);
-                        div.children[0].addEventListener("click", function(event) {
-                            div.parentNode.removeChild(div);
+
+                        div.children[0].addEventListener("click", function() {
+
+                            storedFiles = storedFiles.filter(f => f.name !== file.name);
+
+                            const dt = new DataTransfer();
+                            storedFiles.forEach(f => dt.items.add(f));
+
+                            input.files = dt.files;
+
+                            div.remove();
                         });
+
                     };
-                })
-                
+
+                    reader.readAsDataURL(file);
+
+                });
+
+                const dt = new DataTransfer();
+                storedFiles.forEach(f => dt.items.add(f));
+                input.files = dt.files;
 
             });
         }
+
     } else {
         console.log("Your browser does not support File API");
     }
