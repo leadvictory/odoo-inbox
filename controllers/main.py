@@ -14,23 +14,19 @@ from odoo.http import request
 from odoo.tools import DEFAULT_SERVER_DATETIME_FORMAT
 from odoo.exceptions import AccessError
 import email
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import base64
 import imapclient
 from email.message import EmailMessage
 import re
 import email.policy
 import imaplib
-
-from odoo.addons.odoo_inbox.utils.imap_helper import IMAPHelper
+from imapclient import IMAPClient
+from email.message import EmailMessage
+from email.utils import make_msgid, formatdate
 
 _logger = logging.getLogger(__name__)
 
-def extract_folder_name(raw_folder):
-    decoded = raw_folder.decode()
-    # Matches last quoted string e.g. "INBOX.Sent"
-    m = re.search(r'"([^"]+)"$', decoded)
-    return m.group(1) if m else decoded
 
 class WebsiteOdooInbox(http.Controller):
 
@@ -38,17 +34,6 @@ class WebsiteOdooInbox(http.Controller):
 
     def pager(self, url, total, page=1, step=30, scope=5, url_args=None):
         return pager(url, total, page=page, step=step, scope=scope, url_args=url_args)
-
-    def _safe_partner_ids(raw_list):
-        ids = []
-        for val in raw_list:
-            try:
-                pid = int(val)
-                if pid > 0:
-                    ids.append(pid)
-            except Exception:
-                continue
-        return list(set(ids))
 
     def get_message_counter_domain(self, model_object, domain):
         query = model_object._where_calc(domain)
@@ -64,11 +49,6 @@ class WebsiteOdooInbox(http.Controller):
             self, domain=None, link='/mail', page=1, label=None, color='bluecolor',
             search=None, existing_tag=None, existing_folder=None,
             partner=None, index=0, start=None, end=None, size_filter=None):
-
-        import email
-        import email.policy
-        from datetime import datetime
-        from imapclient import IMAPClient
 
         if domain is None:
             domain = []
@@ -355,11 +335,6 @@ class WebsiteOdooInbox(http.Controller):
             
     @http.route(['/mail/<int:index>/message_read'], type='json', auth="user", website=True)
     def odoo_message_read(self, index, **kw):
-
-        import base64
-        import email
-        import email.policy
-        from imapclient import IMAPClient
 
         message_id = kw.get('message')
 
@@ -712,10 +687,6 @@ class WebsiteOdooInbox(http.Controller):
 
             imap_server = server.connect()
 
-            from email.message import EmailMessage
-            from email.utils import make_msgid, formatdate
-            from datetime import datetime, timezone
-
             msg = EmailMessage()
             msg['Message-ID'] = make_msgid()
             msg['Date'] = formatdate(localtime=True)
@@ -849,17 +820,42 @@ class WebsiteOdooInbox(http.Controller):
         message.write({'msg_unread': False})
 
         # --------------------------------------------------
-        # Save email to IMAP Sent folder
+        # Save email to IMAP Sent folder (IMAPClient)
         # --------------------------------------------------
         try:
             if server:
 
-                imap_server = server.connect()
-
+                from imapclient import IMAPClient
                 from email.message import EmailMessage
                 from email.utils import make_msgid, formatdate
                 from datetime import datetime, timezone
 
+                imap_server = IMAPClient(
+                    server.server,
+                    port=server.port or 993,
+                    ssl=server.is_ssl
+                )
+
+                imap_server.login(server.user, server.password)
+
+                # --------------------------------
+                # Detect Sent folder automatically
+                # --------------------------------
+                sent_folder = None
+
+                folders = imap_server.list_folders()
+
+                for flags, delim, name in folders:
+                    if b'\\Sent' in flags:
+                        sent_folder = name
+                        break
+
+                if not sent_folder:
+                    sent_folder = "Sent"
+
+                # --------------------------------
+                # Build RFC email
+                # --------------------------------
                 msg = EmailMessage()
 
                 msg['Message-ID'] = make_msgid()
@@ -867,16 +863,13 @@ class WebsiteOdooInbox(http.Controller):
                 msg['Subject'] = subject
                 msg['From'] = email_from
 
-                # TO
                 to_emails = request.env['res.partner'].browse(partner_ids).mapped('email')
                 msg['To'] = ", ".join(to_emails)
 
-                # CC
                 if cc_ids:
                     cc_emails = request.env['res.partner'].browse(cc_ids).mapped('email')
                     msg['Cc'] = ", ".join(cc_emails)
 
-                # Proper MIME body
                 msg.set_content("Plain text fallback")
                 msg.add_alternative(body, subtype="html")
 
@@ -893,20 +886,17 @@ class WebsiteOdooInbox(http.Controller):
 
                 raw_message = msg.as_bytes()
 
-                sent_folders = [
-                    "Sent",
-                    "INBOX/Sent",
-                    "Sent Items",
-                    "[Gmail]/Sent Mail"
-                ]
+                # --------------------------------
+                # Append message to Sent folder
+                # --------------------------------
+                imap_server.append(
+                    sent_folder,
+                    raw_message,
+                    flags=['\\Seen'],
+                    msg_time=datetime.now(timezone.utc)
+                )
 
-                for folder in sent_folders:
-                    try:
-                        imap_server.append(folder, ['\\Seen'], datetime.now(timezone.utc), raw_message)
-                        _logger.warning(f"Saved email to IMAP folder: {folder}")
-                        break
-                    except Exception as e:
-                        _logger.warning(f"Failed to save email to {folder}: {e}")
+                _logger.warning(f"Saved email to IMAP Sent folder: {sent_folder}")
 
                 imap_server.logout()
 

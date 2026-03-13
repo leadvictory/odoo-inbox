@@ -1,103 +1,62 @@
-
-import imaplib
-import re
+import smtplib
+from imapclient import IMAPClient
+from email.message import EmailMessage
+from email.utils import make_msgid, formatdate
+from datetime import datetime, timezone
 
 IMAP_SERVER = "mail2.streamstorm.tv"
 IMAP_PORT = 993
+
+SMTP_SERVER = "mail2.streamstorm.tv"
+SMTP_PORT = 465
+
 EMAIL = "info@performance-ag.ch"
 PASSWORD = "0TXK$ZWQLkr9Kf9l"
 
-
-# Detect encoded segments like &APw-
-UTF7_PATTERN = re.compile(r'&[A-Za-z0-9+,]+-')
+TO_EMAIL = "intelliresponse911@gmail.com"
 
 
-def decode_modified_utf7(name):
-    """
-    Decode IMAP modified UTF-7 parts inside a folder name
-    """
+# -----------------------
+# Create message
+# -----------------------
+msg = EmailMessage()
 
-    def repl(match):
-        encoded = match.group(0)
-        try:
-            return imaplib.IMAP4._decode_utf7(encoded)
-        except Exception:
-            return encoded
+msg["Subject"] = "Python IMAPClient test"
+msg["From"] = EMAIL
+msg["To"] = TO_EMAIL
+msg["Message-ID"] = make_msgid()
+msg["Date"] = formatdate(localtime=True)
 
-    return UTF7_PATTERN.sub(repl, name)
+msg.set_content("Plain text fallback")
+msg.add_alternative("<h3>Hello</h3><p>Email sent with Python</p>", subtype="html")
 
-
-def parse_folder(line):
-
-    raw = line.decode(errors="ignore")
-
-    parts = raw.split(' "/" ')
-
-    if len(parts) < 2:
-        return None, None
-
-    name = parts[-1].replace('"', '')
-    delimiter = "/"
-
-    name = decode_modified_utf7(name)
-
-    return name, delimiter
+raw_message = msg.as_bytes()
 
 
-def build_tree(paths, delimiter):
+# -----------------------
+# Send email via SMTP
+# -----------------------
+with smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT) as smtp:
+    smtp.login(EMAIL, PASSWORD)
+    smtp.send_message(msg)
 
-    tree = {}
-
-    for path in paths:
-
-        parts = path.split(delimiter)
-        node = tree
-
-        for part in parts:
-            node = node.setdefault(part, {})
-
-    return tree
+print("Email sent")
 
 
-def print_tree(tree, indent=0):
+# -----------------------
+# Save email to Sent folder using IMAPClient
+# -----------------------
+with IMAPClient(IMAP_SERVER, port=IMAP_PORT, ssl=True) as imap:
+    imap.login(EMAIL, PASSWORD)
 
-    for name, children in sorted(tree.items()):
-        print(" " * indent + name)
-        print_tree(children, indent + 4)
+    # If your Thunderbird shows folder "Sent", this is correct
+    sent_folder = "Sent"
 
+    imap.append(
+        sent_folder,
+        raw_message,
+        flags=["\\Seen"],
+        msg_time=datetime.now(timezone.utc)
+    )
 
-def main():
-
-    print("Connecting to IMAP server...\n")
-
-    mail = imaplib.IMAP4_SSL(IMAP_SERVER, IMAP_PORT)
-    mail.login(EMAIL, PASSWORD)
-
-    status, folders = mail.list()
-
-    folder_names = []
-
-    print("Decoded folders:\n")
-
-    for f in folders:
-
-        name, delimiter = parse_folder(f)
-
-        if not name:
-            continue
-
-        folder_names.append(name)
-
-        print(name)
-
-    print("\nFolder Tree Structure:\n")
-
-    tree = build_tree(folder_names, delimiter)
-
-    print_tree(tree)
-
-    mail.logout()
-
-
-if __name__ == "__main__":
-    main()
+print("Email saved to Sent folder")
