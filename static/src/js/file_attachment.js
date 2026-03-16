@@ -1,124 +1,89 @@
-window.onload = function() {
+window.onload = function () {
 
-    let storedFiles = [];
+    const fileInputs = document.querySelectorAll(".compose_attach_file");
 
-    if (window.File && window.FileList && window.FileReader) {
+    fileInputs.forEach(input => {
 
-        var filesInput = document.getElementsByClassName("compose_attach_file");
+        let storedFiles = [];
 
-        for (let j = 0; j < filesInput.length; j++) {
+        input.addEventListener("change", function (event) {
 
-            filesInput[j].addEventListener("change", function(event) {
+            console.log("Files selected");
 
-                const input = event.target;
-                const files = Array.from(input.files);
-                const parentele = input.parentNode.nextElementSibling;
+            const previewContainer = input.parentNode.nextElementSibling;
+            const files = Array.from(event.target.files);
 
-                files.forEach(function(file) {
+            console.log("Raw files from input:", files);
 
-                    storedFiles.push(file);
+            files.forEach(file => {
 
-                    const reader = new FileReader();
+                console.log("Processing file:", file.name);
 
-                    reader.onload = function(e) {
+                // prevent duplicates
+                if (storedFiles.find(f => f.name === file.name)) {
+                    console.log("Duplicate skipped:", file.name);
+                    return;
+                }
 
-                        if ($("#compose_attach_result").length !== 0) {
-                            $("#compose_attach_result").css('padding-top', '5px');
-                        }
+                storedFiles.push(file);
 
-                        const div = document.createElement("div");
+                console.log("Stored files:", storedFiles);
 
-                        let icon = "/odoo_inbox/static/src/img/zip.png";
+                const reader = new FileReader();
 
-                        if (file.type.match('image')) {
-                            icon = e.target.result;
-                        } else if (file.type === 'application/vnd.ms-excel') {
-                            icon = "/odoo_inbox/static/src/img/excel.png";
-                        } else if (file.type === 'application/pdf') {
-                            icon = "/odoo_inbox/static/src/img/pdf.png";
-                        }
+                reader.onload = function (e) {
 
-                        div.innerHTML =
-                            "<span class='fa fa-times-circle'></span>" +
-                            "<img class='thumbnail' src='" + icon + "' title='" + file.name + "'/>";
+                    const div = document.createElement("div");
 
-                        parentele.appendChild(div);
+                    let icon = "/odoo_inbox/static/src/img/zip.png";
 
-                        div.children[0].addEventListener("click", function() {
+                    if (file.type.startsWith("image")) {
+                        icon = e.target.result;
+                    }
+                    else if (file.type === "application/pdf") {
+                        icon = "/odoo_inbox/static/src/img/pdf.png";
+                    }
+                    else if (file.type.includes("excel")) {
+                        icon = "/odoo_inbox/static/src/img/excel.png";
+                    }
 
-                            storedFiles = storedFiles.filter(f => f.name !== file.name);
+                    div.innerHTML =
+                        "<span class='fa fa-times-circle remove-file'></span>" +
+                        "<img class='thumbnail' src='" + icon + "' title='" + file.name + "'/>";
 
-                            const dt = new DataTransfer();
-                            storedFiles.forEach(f => dt.items.add(f));
+                    previewContainer.appendChild(div);
 
-                            input.files = dt.files;
+                    div.querySelector(".remove-file").onclick = function () {
 
-                            div.remove();
-                        });
+                        console.log("Removing file:", file.name);
 
+                        storedFiles = storedFiles.filter(f => f.name !== file.name);
+
+                        const dt = new DataTransfer();
+                        storedFiles.forEach(f => dt.items.add(f));
+
+                        input.files = dt.files;
+
+                        console.log("Remaining files:", storedFiles);
+
+                        div.remove();
                     };
 
-                    reader.readAsDataURL(file);
+                };
 
-                });
-
-                const dt = new DataTransfer();
-                storedFiles.forEach(f => dt.items.add(f));
-                input.files = dt.files;
+                reader.readAsDataURL(file);
 
             });
-        }
 
-    } else {
-        console.log("Your browser does not support File API");
-    }
+            // update input file list
+            const dt = new DataTransfer();
+            storedFiles.forEach(f => dt.items.add(f));
+            input.files = dt.files;
 
-    //compose_attach_result
+            console.log("Final files inside input:", input.files);
 
-    if (window.File && window.FileList && window.FileReader) {
-        var filesInput = document.getElementsByClassName("compose_attach_file");
-        for (j = 0; j < filesInput.length; j++) {
-            filesInput[j].addEventListener("change", function(event) {
-                var files = event.target.files; //FileList object
-                //var output = document.getElementById("result");
-                //var parentele = event.target.parentNode;
-                var parentele = event.target.parentNode.nextElementSibling;
+        });
 
-                $(files).each(function(file) {
-                    var self = this;
-                    var reader = new FileReader();
-                    reader.readAsDataURL(this);
-                    reader.onload = function(e) {
-                        if ($("#compose_attach_result").length != 0) {
-                            $("#compose_attach_result").css('padding-top', '5px')
-                            // document.getElementById("compose_attach_result").style.display = "inline-flex";
-                        }
-                        var picFile = e.target;
-                        var div = document.createElement("div");
-                        if (self.type.match('image')) {
-                            div.innerHTML = "<span href='#' class='fa fa-times-circle'></span> <img class='thumbnail' src='" + picFile.result + "'" +
-                                "title='" + self.name + "'/>";
-                        } else if (self.type === 'application/vnd.ms-excel') {
-                            div.innerHTML = "<span href='#' class='fa fa-times-circle'></span> <img class='thumbnail' src='/odoo_inbox/static/src/img/excel.png'" +
-                                "title='" + self.name + "'/>";
-                        } else if (self.type === 'application/pdf') {
-                            div.innerHTML = "<span href='#' class='fa fa-times-circle'></span> <img class='thumbnail' src='/odoo_inbox/static/src/img/pdf.png'" +
-                                "title='" + self.name + "'/>";
-                        } else {
-                            div.innerHTML = "<span href='#' class='fa fa-times-circle'></span> <img class='thumbnail' src='/odoo_inbox/static/src/img/zip.png'" +
-                                "title='" + self.name + "'/>";
-                        }
-                        parentele.appendChild(div);
-                        div.children[0].addEventListener("click", function(event) {
-                            div.parentNode.removeChild(div);
-                        });
-                    };
-                })
-                
-                
-            });
-        }
-    } else {
-        console.log("Your browser does not support File API");
-    }
-}
+    });
+
+};

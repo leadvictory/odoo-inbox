@@ -824,7 +824,7 @@ odoo.define('odoo_inbox.odoo_inbox', function(require) {
             if (window.File && window.FileList && window.FileReader) {
                 var filesInput = document.getElementsByClassName("image_src");
 
-                for (j = 0; j < filesInput.length; j++) {
+                for (var j = 0; j < filesInput.length; j++) {
                     filesInput[j].addEventListener("change", function(event) {
                         var files = event.target.files;
                         var parentele = event.target.parentNode.nextElementSibling;

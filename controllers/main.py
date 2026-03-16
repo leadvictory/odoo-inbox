@@ -590,7 +590,7 @@ class WebsiteOdooInbox(http.Controller):
         # Attachments (safe multi-upload)
         # ------------------------------------------------------
         attachment_ids = []
-        files = request.httprequest.files.getlist('compose_attachments[]')
+        files = request.httprequest.files.getlist('compose_attachments')
 
         for f in files:
             if f and f.filename:
@@ -772,7 +772,7 @@ class WebsiteOdooInbox(http.Controller):
         # Attachments
         # --------------------------------------------------
         attachment_ids = []
-        files = request.httprequest.files.getlist('compose_attachments[]')
+        files = request.httprequest.files.getlist('compose_attachments')
 
         for f in files:
             if f and f.filename:
@@ -1063,6 +1063,7 @@ class WebsiteOdooInbox(http.Controller):
         message.sudo().unlink()
         return request.redirect('/mail/trash')
 
+    @http.route('/mail/<int:index>/all_mssg_trash', type="json", auth="user", website=True)
     def odoo_all_mssg_trash(self, index=0, messg_ids=[], **post):
 
         from imapclient import IMAPClient
