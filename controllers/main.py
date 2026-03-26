@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # Powered by Kanak Infosystems LLP.
-# © 2020 Kanak Infosystems LLP. (<https://www.kanakinfosystems.com>).
+# � 2020 Kanak Infosystems LLP. (<https://www.kanakinfosystems.com>).
 
 import base64
 import logging
@@ -109,7 +109,7 @@ class WebsiteOdooInbox(http.Controller):
             return request.make_response("<h3>IMAP connection failed</h3>")
 
         _logger.warning(
-            "IMAP DEBUG → host=%s port=%s user=%s",
+            "IMAP DEBUG ? host=%s port=%s user=%s",
             server.server,
             server.port,
             server.user
@@ -445,16 +445,26 @@ class WebsiteOdooInbox(http.Controller):
                     except Exception as e:
                         _logger.error(f"Attachment save error: {e}")
 
+                from odoo.fields import Datetime
+                from odoo.tools.misc import format_datetime
+
                 msg_dict['attachments'] = attachments
 
-                mail_time = fields.Datetime.from_string(msg_dict['date'])
+                mail_time = Datetime.from_string(msg_dict['date']) if msg_dict.get('date') else False
+                mail_time_str = format_datetime(
+                    request.env,
+                    mail_time,
+                    tz=request.env.user.tz or 'UTC',
+                    lang_code=request.env.user.lang
+                ) if mail_time else ''
 
                 message_body = request.env['ir.ui.view']._render_template(
                     "odoo_inbox.inbox_message_detail",
                     {
                         'mail': msg_dict,
                         'index': index,
-                        'mail_time': mail_time
+                        'mail_time': mail_time,
+                        'mail_time_str': mail_time_str,
                     }
                 )
 
@@ -590,7 +600,7 @@ class WebsiteOdooInbox(http.Controller):
         # Attachments (safe multi-upload)
         # ------------------------------------------------------
         attachment_ids = []
-        files = request.httprequest.files.getlist('compose_attachments')
+        files = request.httprequest.files.getlist('compose_attachments[]')
 
         for f in files:
             if f and f.filename:
@@ -772,7 +782,7 @@ class WebsiteOdooInbox(http.Controller):
         # Attachments
         # --------------------------------------------------
         attachment_ids = []
-        files = request.httprequest.files.getlist('compose_attachments')
+        files = request.httprequest.files.getlist('compose_attachments[]')
 
         for f in files:
             if f and f.filename:
@@ -1063,7 +1073,6 @@ class WebsiteOdooInbox(http.Controller):
         message.sudo().unlink()
         return request.redirect('/mail/trash')
 
-    @http.route('/mail/<int:index>/all_mssg_trash', type="json", auth="user", website=True)
     def odoo_all_mssg_trash(self, index=0, messg_ids=[], **post):
 
         from imapclient import IMAPClient
@@ -1109,7 +1118,7 @@ class WebsiteOdooInbox(http.Controller):
 
             if (
                 'trash' in lower
-                or 'gelöscht' in lower
+                or 'gel�scht' in lower
                 or 'geloscht' in lower
                 or 'deleted' in lower
             ):
@@ -1352,20 +1361,20 @@ class WebsiteOdooInbox(http.Controller):
         old_encoded = imapclient.imap_utf7.encode(old_raw)
         new_encoded = imapclient.imap_utf7.encode(full_new_name)
 
-        # _logger.info(f"Renaming IMAP folder: {old_raw} → {full_new_name}")
+        # _logger.info(f"Renaming IMAP folder: {old_raw} ? {full_new_name}")
 
         try:
             imap_server.rename(old_encoded, new_encoded)
-            # _logger.info(f"Rename OK: {old_raw} → {full_new_name}")
+            # _logger.info(f"Rename OK: {old_raw} ? {full_new_name}")
         except Exception as e:
             _logger.error(f"IMAP rename failed: {e}")
             return request.redirect(request.httprequest.referrer)
 
-        # 🔥 IMPORTANT: REFRESH IMAP LIST SO ODOO SEES THE NEW FOLDER
+        # ?? IMPORTANT: REFRESH IMAP LIST SO ODOO SEES THE NEW FOLDER
         imap_server.select("INBOX")
         imap_server.list()     # <--- REFRESH CACHE
 
-        # 🔥 Update Odoo database folder record
+        # ?? Update Odoo database folder record
         folder_rec = request.env['message.folder'].sudo().search([('name', '=', old_raw)], limit=1)
         if folder_rec:
             folder_rec.name = full_new_name

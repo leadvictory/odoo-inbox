@@ -197,81 +197,128 @@
             </div>
         </div>
         <div id="menu" t-attf-class="scroll scroll4 #{color}">
+
+            <!-- Compose -->
             <div class="mail-compose-button">
                 <a role="button" href="#" class="btn btn-success btn-icon col-12 open_newmail">
                     <span>Schreiben</span>
                     <i class="fa fa-pencil"/>
                 </a>
             </div>
+
+            <!-- Inbox -->
             <div class="head-menu">
                 <div t-att-class="'list active' if label == 'inbox' else 'list'">
                     <a t-att-href="'/mail/'+str(index)+'/inbox'">
+
                         <img class="list-img" src="/odoo_inbox/static/src/img/inbox.png"/>
+
                         <p class="plist">Inbox</p>
+
                         <t t-if="inbox_mssg_count">
                             <span class="badge inbox_mssg_count">
                                 <t t-esc="inbox_mssg_count"/>
                             </span>
                         </t>
+
                     </a>
                 </div>
             </div>
+
+            <!-- Partner Filter -->
             <div class="head-menu d-flex flex-column" t-if="user_child_partner_ids">
+
                 <div>
                     <h4>
                         <p class="text-justify mb-1 mx-3">Filter:</p>
                     </h4>
                 </div>
-                <div t-foreach="user_child_partner_ids" t-as="partner" t-att-class="'active-partner' if current_partner.id == partner.id else 'remain-partner'">
-                    <div class="list p-2" style="width: auto; height: auto">
+
+                <div t-foreach="user_child_partner_ids" t-as="partner"
+                    t-att-class="'active-partner' if current_partner.id == partner.id else 'remain-partner'">
+
+                    <div class="list p-2">
+
                         <a t-att-href="'/mail/filter/partner/' + str(partner.id)">
+
                             <t t-if="partner.image_256">
-                                <img class="img img-fluid rounded other_email_user_icon" t-attf-src="/web/image?model=res.partner&amp;field=image_256&amp;id=#{partner.id}" t-att-title="partner.name" t-att-alt="partner.name"/>
-                                <!-- <div t-field="partner.image_256" t-options="{'widget': 'image', 'class': 'img img-fluid rounded other_email_user_icon' }" /> -->
+                                <img class="img img-fluid rounded other_email_user_icon"
+                                    t-attf-src="/web/image?model=res.partner&amp;field=image_256&amp;id=#{partner.id}"/>
                             </t>
+
                             <t t-else="">
-                                <img class="img img-fluid rounded other_email_user_icon" src="/odoo_inbox/static/src/img/demo_user_icom.png"/>
+                                <img class="img img-fluid rounded other_email_user_icon"
+                                    src="/odoo_inbox/static/src/img/demo_user_icom.png"/>
                             </t>
+
                             <span class="email_user_name" t-esc="partner.name"/>
+
                         </a>
+
                     </div>
+
                 </div>
+
             </div>
+
+            <!-- Tags -->
             <div class="head-menu" t-if="tag_ids">
+
                 <t t-foreach="tag_ids" t-as="tag">
+
                     <div t-attf-class="list #{'active' if tag.id == existing_tag else ''}">
+
                         <a t-attf-href="/mail/tag/#{tag.id}">
+
                             <img class="list-img" src="/odoo_inbox/static/src/img/promos.png"/>
+
                             <p class="plist">
                                 <t t-esc="tag.name"/>
                             </p>
-                            <a href="" class="tag_setting_a" data-bs-toggle="modal" t-attf-data-bs-target="#tag_model_#{tag.id}">
-                                <img class="setting_img" src="/odoo_inbox/static/src/img/settings.png"/>
-                            </a>
+
                         </a>
-                    </div>
-                </t>
-            </div>
-            <div class="head-menu" t-if="folder_ids">
-                <t t-set="counter" t-value="0"/>
-                <t t-foreach="folder_ids" t-as="folder">
-                    <t t-set="counter" t-value="counter + 1"/>
-                    <div t-attf-class="list #{'active' if folder['id'] == existing_folder else ''}">
-                        <a t-attf-href="/mail/#{index}/folder/#{folder['id']}?search=#{search}">
-                            <img class="list-img" src="/odoo_inbox/static/src/img/folder.png"/>
-                            <p class="plist">
-                                <t t-esc="folder['name']"/>
-                            </p>
-                            <span class="badge folder_mssg_count" t-attf-id="counter_fd_msg#{folder['id']}" t-att-style="'display:none;' if '0' == counter_fd_msgs.get(str(folder['id'])) else ''">
-                                <t t-esc="counter_fd_msgs.get(str(folder['id']))"/>
-                            </span>
-                            <a href="" class="folder_setting_a" data-bs-toggle="modal" t-attf-data-bs-target="#folder_model_#{counter}">
-                                <img class="setting_img" src="/odoo_inbox/static/src/img/settings.png"/>
-                            </a>
+
+                        <a href="#"
+                        class="tag_setting_a"
+                        data-bs-toggle="modal"
+                        t-attf-data-bs-target="#tag_model_#{tag.id}">
+
+                            <img class="setting_img"
+                                src="/odoo_inbox/static/src/img/settings.png"/>
+
                         </a>
+
                     </div>
+
                 </t>
+
             </div>
+
+            <!-- Folder Tree -->
+            <div class="head-menu folder-tree" t-if="folder_ids">
+
+                <!-- Debug: log folders structure to browser console -->
+                <script type="text/javascript">
+                    console.log(
+                        "Odoo Inbox UI - folder_ids:",
+                        JSON.parse('<t t-esc="json.dumps(folder_ids)"/>' || "[]")
+                    );
+                    console.log(
+                        "Odoo Inbox UI - existing_folder:",
+                        JSON.parse('<t t-esc="json.dumps(existing_folder)"/>' || "null")
+                    );
+                </script>
+
+                <t t-call="odoo_inbox.folder_tree">
+                    <t t-set="folders" t-value="folder_ids"/>
+                    <t t-set="existing_folder" t-value="existing_folder"/>
+                    <t t-set="counter_fd_msgs" t-value="counter_fd_msgs"/>
+                    <t t-set="index" t-value="index"/>
+                    <t t-set="search" t-value="search"/>
+                </t>
+
+            </div>
+
         </div>
         <!-- folder add temp -->
         <t t-set="counter" t-value="0"/>
@@ -337,6 +384,7 @@
                 </div>
             </t>
     </template>
+    
     <template id="address_dropdown" name="Tag dropdown">
         <div class="address_dropdown">
             <span>to me</span>
@@ -433,7 +481,7 @@
                             </div>
                         </div>
                         <div class="date_content col-md-4">
-                            <span t-esc="format_datetime(mail_time)"/>
+                            <span t-esc="mail_time_str"/>
                         </div>
                     </div>
                     <t t-if="mail['attachments']">
@@ -446,7 +494,7 @@
                         </div>
                     </t>
                     <div class="message__details__body__content col-md-12 col-xs-12">
-                        <p t-raw="mail['body']"/>
+                        <t t-out="mail['body']"/>
                     </div>
                     <!--<div class="clearfix" />-->
                     <!--<div class="col-sm-12 col-xs-12">-->
@@ -512,7 +560,7 @@
                                     <input name="attachments"
                                         type="file"
                                         class="file form-control image_src"
-                                        multiple
+                                        multiple="multiple"
                                         title="Attach files"/>
                                 </span>
                                 <output class="output_result"/>
@@ -705,12 +753,10 @@
                                                     </a>
                                                 </li>
                                                 <hr style="margin-top: 0px;margin-bottom: 0px;padding: 0 0;" />
-                                                <t t-foreach="folder_ids" t-as="folder">
-                                                    <li t-if="folder['id'] != existing_folder">
-                                                        <a class="movetofolder" t-att-data-folder_id="folder['id']">
-                                                            <t t-esc="folder['name']"/>
-                                                        </a>
-                                                    </li>
+                                                <!-- Recursive move-to folder list -->
+                                                <t t-call="odoo_inbox.folder_tree_move">
+                                                    <t t-set="folders" t-value="folder_ids"/>
+                                                    <t t-set="existing_folder" t-value="existing_folder"/>
                                                 </t>
                                                 <li class="apply_button create_new_folder">
                                                     <form action="/mail/folder/create" method="POST">
@@ -884,7 +930,7 @@
                         <div class="menu footer min-hide">
                             <button class="btn" type="submit" title="Send">Send</button>
                             <span class="compose_attach">
-                                <input type="file" name="compose_attachments" id="file-2" class="inputfile inputfile-2 compose_attach_file" data-multiple-caption="{count} files selected" multiple=""/>
+                                <input type="file" name="compose_attachments" id="file-2" class="inputfile inputfile-2 compose_attach_file" data-multiple-caption="{count} files selected" multiple="multiple" />
                                 <label for="file-2"><i class="fa fa-paperclip"></i></label>
                                 <div class="clearfix"/>
                             </span>
@@ -901,6 +947,75 @@
                     </form>
                 </div>
             </div>
+        </t>
+    </template>
+    <template id="folder_tree">
+        <t t-foreach="folders" t-as="folder">
+
+            <div class="list folder-item"
+                t-attf-class="#{'active' if existing_folder and folder['id'] == existing_folder['id'] else ''}">
+
+                <a t-attf-href="/mail/#{index}/folder/#{folder['id']}?search=#{search}">
+
+                    <img class="list-img"
+                        src="/odoo_inbox/static/src/img/folder.png"/>
+
+                    <p class="plist">
+                        <t t-esc="folder['name']"/>
+                    </p>
+
+                    <span class="badge folder_mssg_count"
+                        t-attf-id="counter_fd_msg#{folder['id']}"
+                        t-att-style="'display:none;' if '0' == counter_fd_msgs.get(str(folder['id'])) else ''">
+
+                        <t t-esc="counter_fd_msgs.get(str(folder['id']))"/>
+
+                    </span>
+
+                </a>
+
+            </div>
+
+            <!-- recursive children -->
+            <t t-if="folder['children']">
+
+                <div class="folder-children ms-3">
+
+                    <t t-call="odoo_inbox.folder_tree">
+
+                        <t t-set="folders" t-value="folder['children']"/>
+                        <t t-set="existing_folder" t-value="existing_folder"/>
+                        <t t-set="counter_fd_msgs" t-value="counter_fd_msgs"/>
+                        <t t-set="index" t-value="index"/>
+                        <t t-set="search" t-value="search"/>
+
+                    </t>
+
+                </div>
+
+            </t>
+
+        </t>
+
+    </template>
+
+    <!-- Recursive folder list for "Move to..." dropdown -->
+    <template id="folder_tree_move">
+        <t t-foreach="folders" t-as="folder">
+
+            <li t-if="not existing_folder or folder['id'] != existing_folder['id']">
+                <a class="movetofolder" t-att-data-folder_id="folder['id']">
+                    <t t-esc="folder['name']"/>
+                </a>
+            </li>
+
+            <t t-if="folder['children']">
+                <t t-call="odoo_inbox.folder_tree_move">
+                    <t t-set="folders" t-value="folder['children']"/>
+                    <t t-set="existing_folder" t-value="existing_folder"/>
+                </t>
+            </t>
+
         </t>
     </template>
 </odoo>
